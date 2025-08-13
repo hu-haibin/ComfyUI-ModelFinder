@@ -70,7 +70,10 @@
         "WanVideoModelLoader",
         "WanVideoVAELoader",
         "TestLoader",
-        "Joy_caption_two_load"
+        "Joy_caption_two_load",
+        "INPAINT_LoadInpaintModel",
+        "LoadRembgByBiRefNetModel",
+        "SUPIR_model_loader_v2"
     ],
     "node_model_indices": {
         "default": [

@@ -1,0 +1,7 @@
+﻿序号,节点ID,节点类型,文件名,状态,下载链接,镜像链接,搜索链接
+1,22,WanVideoModelLoader,Wan2_1-I2V-14B-480P_fp8_e4m3fn.safetensors,已处理,https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-480P,https://hf-mirror.com/Wan-AI/Wan2.1-I2V-14B-480P,
+2,38,WanVideoVAELoader,Wan2_1_VAE_bf16.safetensors,已处理,https://huggingface.co/DeepBeepMeep/Wan2.1/blame/a2410b2d8338aed38eda52f3ea21877fb2876092/Wan2.1_VAE_bf16.safetensors,https://hf-mirror.com/DeepBeepMeep/Wan2.1/blame/a2410b2d8338aed38eda52f3ea21877fb2876092/Wan2.1_VAE_bf16.safetensors,
+3,48,LoadWanVideoClipTextEncoder,open-clip-xlm-roberta-large-vit-huge-14_visual_fp16.safetensors,已处理,https://huggingface.co/Kijai/WanVideo_comfy/blame/346ea0b6848edd2aa7e34d0444b2b05ebc7bd97a/open-clip-xlm-roberta-large-vit-huge-14_fp16.safetensors,https://hf-mirror.com/Kijai/WanVideo_comfy/blame/346ea0b6848edd2aa7e34d0444b2b05ebc7bd97a/open-clip-xlm-roberta-large-vit-huge-14_fp16.safetensors,
+4,55,RIFE VFI,rife47.pth,已处理,https://huggingface.co/jasonot/mycomfyui/resolve/main/rife47.pth,https://hf-mirror.com/jasonot/mycomfyui/resolve/main/rife47.pth,
+5,11,LoadWanVideoT5TextEncoder,umt5-xxl-enc-bf16.safetensors,已处理,https://huggingface.co/Evados/DiffSynth-Studio-Lora-Wan2.1-ComfyUI/blame/main/umt5-xxl-enc-bf16.safetensors,https://hf-mirror.com/Evados/DiffSynth-Studio-Lora-Wan2.1-ComfyUI/blame/main/umt5-xxl-enc-bf16.safetensors,
+6,45,WanVideoLoraSelect,场景环绕_图生视频_平面转3D_建筑效果视频展示_v1,已处理,,,https://www.liblib.art/modelinfo/e17310cc2a7c47509e0b5c159fd6faba?versionUuid=cc805637c4e640fc83dc252082221246

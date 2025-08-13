@@ -1,0 +1,13 @@
+﻿序号,节点ID,节点类型,文件名,状态,下载链接,镜像链接,搜索链接
+1,"89,224",UpscaleModelLoader,4xRealWebPhoto_v4_dat2.pth,,,,https://www.bing.com/search?q=site:huggingface.co+%224xRealWebPhoto_v4_dat2.pth%22
+2,49,LoraLoaderModelOnly,AWPortrait CN_1.0.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22AWPortrait+CN_1.0.safetensors%22
+3,232,SUPIR_Upscale,SUPIR-v0F.ckpt,,,,https://www.bing.com/search?q=site:huggingface.co+%22SUPIR-v0F.ckpt%22
+4,28,ControlNetLoader,Shakker-LabsFLUX.1-dev-ControlNet-Union-Pro.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22Shakker-LabsFLUX.1-dev-ControlNet-Union-Pro.safetensors%22
+5,232,SUPIR_Upscale,XXMix_9realisticSDXL.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22XXMix_9realisticSDXL.safetensors%22
+6,170,VAELoader,ae.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22flux+vae.safetensors%22
+7,175,DualCLIPLoader,clip_l.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22clip_l.safetensors%22
+8,21,CheckpointLoaderSimple,flux1-dev-fp8.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22flux1-dev-fp8.safetensors%22
+9,176,UNETLoader,flux1-fill-dev.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22flux1-fill-dev.safetensors%22
+10,172,StyleModelLoader,flux1-redux-dev.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22flux1-redux-dev.safetensors%22
+11,173,CLIPVisionLoader,sigclip_vision_patch14_384.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22sigclip_vision_patch14_384.safetensors%22
+12,175,DualCLIPLoader,t5xxl_fp8_e4m3fn.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22t5xxl_fp8_e4m3fn.safetensors%22

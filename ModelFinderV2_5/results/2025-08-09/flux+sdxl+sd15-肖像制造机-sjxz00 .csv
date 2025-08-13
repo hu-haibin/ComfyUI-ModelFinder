@@ -1,0 +1,13 @@
+﻿序号,节点ID,节点类型,文件名,状态,下载链接,镜像链接,搜索链接
+1,72,LoraLoaderModelOnly,AWPortrait CN_1.0.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22AWPortrait+CN_1.0.safetensors%22
+2,"100,96",Upscale Model Loader,RealESRGAN_x2.pth,,,,https://www.bing.com/search?q=site:huggingface.co+%22RealESRGAN_x2.pth%22
+3,93,LoraLoader,SDXLrender_v2.0.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22SDXLrender_v2.0.safetensors%22
+4,120,SUPIR_Upscale,SUPIR-v0F.ckpt,,,,https://www.bing.com/search?q=site:huggingface.co+%22SUPIR-v0F.ckpt%22
+5,120,SUPIR_Upscale,XXMix_9realisticSDXL.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22XXMix_9realisticSDXL.safetensors%22
+6,68,VAELoader,ae.sft,,,,https://www.bing.com/search?q=site:huggingface.co+%22ae.sft%22
+7,66,DualCLIPLoader,clip_l.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22clip_l.safetensors%22
+8,80,ControlNetLoader,control_v11f1e_sd15_tile.pth,,,,https://www.bing.com/search?q=site:huggingface.co+%22control_v11f1e_sd15_tile.pth%22
+9,62,UnetLoaderGGUF,flux1-dev-Q8_0.gguf,,,,https://www.bing.com/search?q=site:huggingface.co+%22flux1-dev-Q8_0.gguf%22
+10,76,CheckpointLoaderSimple,juggernautXL_v9Rundiffusionphoto2.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22juggernautXL_v9Rundiffusionphoto2.safetensors%22
+11,66,DualCLIPLoader,t5xxl_fp8_e4m3fn.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22t5xxl_fp8_e4m3fn.safetensors%22
+12,82,VAELoader,vae-ft-mse-840000-ema-pruned.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22vae-ft-mse-840000-ema-pruned.safetensors%22

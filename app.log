@@ -1,0 +1,8 @@
+2025-08-09 00:48:30,801 - INFO - [root] - Logging configured successfully.
+2025-08-09 00:48:30,801 - INFO - [root] - Log level set to: DEBUG
+2025-08-09 00:48:30,801 - INFO - [__main__] - Starting Model Finder N/A...
+2025-08-09 00:48:30,802 - CRITICAL - [__main__] - ERROR: Could not import Model Finder components: No module named 'ModelFinderV2_5'
+Traceback (most recent call last):
+  File "C:\Users\huhaibin\Desktop\E - Archive 归档区\ComfyUI-ModelFinder-V2\run_model_finder.py", line 88, in main
+    from ModelFinderV2_5.model_finder import main as start_app
+ModuleNotFoundError: No module named 'ModelFinderV2_5'

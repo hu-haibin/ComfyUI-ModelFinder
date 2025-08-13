@@ -69,7 +69,10 @@
         "WanVideoLoraSelect",
         "WanVideoModelLoader",
         "WanVideoVAELoader",
-        "TestLoader"
+        "TestLoader",
+        "Joy_caption_two_load",
+        "INPAINT_LoadInpaintModel",
+        "LoadRembgByBiRefNetModel"
     ],
     "node_model_indices": {
         "default": [

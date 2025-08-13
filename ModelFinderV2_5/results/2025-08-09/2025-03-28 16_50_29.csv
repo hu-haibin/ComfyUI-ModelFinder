@@ -1,0 +1,8 @@
+﻿序号,节点ID,节点类型,文件名,状态,下载链接,镜像链接,搜索链接
+1,251,Upscale Model Loader,4x_NMKD-Superscale-SP_178000_G,,,,https://www.bing.com/search?q=site:huggingface.co+%224x_NMKD-Superscale-SP_178000_G%22
+2,240,LoraLoader,AIFLOW-商业改造设计_V2.0,,,,https://www.bing.com/search?q=site:liblib.art+%22AIFLOW-商业改造设计_V2.0%22
+3,209,IPAdapterUnifiedLoader,PLUS (high strength),,,,https://www.bing.com/search?q=site:huggingface.co+%22PLUS+(high+strength)%22
+4,214,LoraLoader,QLCD-示范区灌木跌水氛围增加XL_洗图景观细节_1.0,,,,https://www.bing.com/search?q=site:liblib.art+%22QLCD-示范区灌木跌水氛围增加XL_洗图景观细节_1.0%22
+5,207,ControlNetLoader,t2i-adapter_diffusers_xl_lineart,,,,https://www.bing.com/search?q=site:huggingface.co+%22t2i-adapter_diffusers_xl_lineart%22
+6,220,ControlNetLoader,xinsir_controlnet-canny-sdxl_V2,,,,https://www.bing.com/search?q=site:huggingface.co+%22xinsir_controlnet-canny-sdxl_V2%22
+7,216,CheckpointLoaderSimple,元技能-Yuan_SDXL_0.2-建筑室外大模型_Yuan_SDXL_0.2,,,,https://www.bing.com/search?q=site:liblib.art+%22Yuan_SDXL_0.2-建筑室外大模型_Yuan_SDXL_0.2%22

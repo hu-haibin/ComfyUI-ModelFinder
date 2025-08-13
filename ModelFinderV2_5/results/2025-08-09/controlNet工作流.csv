@@ -1,0 +1,8 @@
+﻿序号,节点ID,节点类型,文件名,状态,下载链接,镜像链接,搜索链接
+1,8,ControlNetLoader,Shakker-LabsFLUX.1-dev-ControlNet-Union-Pro-2.0.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22Shakker-LabsFLUX.1-dev-ControlNet-Union-Pro-2.0.safetensors%22
+2,7,VAELoader,ae.sft,,,,https://www.bing.com/search?q=site:huggingface.co+%22ae.sft%22
+3,6,DualCLIPLoader,clip_l.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22clip_l.safetensors%22
+4,5,UNETLoader,flux1-dev-fp8.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22flux1-dev-fp8.safetensors%22
+5,17,StyleModelLoader,flux1-redux-dev.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22flux1-redux-dev.safetensors%22
+6,9,CLIPVisionLoader,sigclip_vision_patch14_384.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22sigclip_vision_patch14_384.safetensors%22
+7,6,DualCLIPLoader,t5xxl_fp8_e4m3fn_2.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22t5xxl_fp8_e4m3fn_2.safetensors%22
