@@ -1,0 +1,9 @@
+﻿序号,节点ID,节点类型,文件名,状态,下载链接,镜像链接,搜索链接
+1,15,UNETLoader,F.1-Fill-fp16_Inpaint&Outpaint_1.0,已处理,https://huggingface.co/jojoban/F.1-Fill-fp16_Inpaint-Outpaint/resolve/main/README.md,https://hf-mirror.com/jojoban/F.1-Fill-fp16_Inpaint-Outpaint/resolve/main/README.md,
+2,221,Florence2ModelLoader,Florence-2-large-PromptGen-v2.0,已处理,https://huggingface.co/MiaoshouAI/Florence-2-large-PromptGen-v2.0,https://hf-mirror.com/MiaoshouAI/Florence-2-large-PromptGen-v2.0,
+3,16,VAELoader,ae.sft,已处理,https://huggingface.co/black-forest-labs/FLUX.1-schnell/discussions/28,https://hf-mirror.com/black-forest-labs/FLUX.1-schnell/discussions/28,
+4,12,DualCLIPLoader,clip_l,已处理,https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors,https://hf-mirror.com/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors,
+5,19,StyleModelLoader,flux1-redux-dev,已处理,https://huggingface.co/black-forest-labs/FLUX.1-Redux-dev,https://hf-mirror.com/black-forest-labs/FLUX.1-Redux-dev,
+6,21,CLIPVisionLoader,sigclip_vision_patch14_384,已处理,https://huggingface.co/Comfy-Org/sigclip_vision_384/resolve/main/sigclip_vision_patch14_384.safetensors,https://hf-mirror.com/Comfy-Org/sigclip_vision_384/resolve/main/sigclip_vision_patch14_384.safetensors,
+7,12,DualCLIPLoader,t5xxl_fp16,已处理,https://huggingface.co/AUTOMATIC/stable-diffusion-3-medium-text-encoders/resolve/main/t5xxl_fp16.safetensors,https://hf-mirror.com/AUTOMATIC/stable-diffusion-3-medium-text-encoders/resolve/main/t5xxl_fp16.safetensors,
+8,235,UNETLoader,基础算法_F.1,已处理,,,https://www.liblib.art/modelinfo/488cd9d58cd4421b9e8000373d7da123

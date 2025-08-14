@@ -1,9 +1,0 @@
-﻿序号,节点ID,节点类型,文件名,状态,下载链接,镜像链接,搜索链接
-1,166,GroundingDinoModelLoader (segment anything),GroundingDINO_SwinB (938MB),,,,https://www.bing.com/search?q=site:huggingface.co+%22GroundingDINO_SwinB+(938MB)%22
-2,43,VAELoader,ae.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22flux+vae.safetensors%22
-3,44,DualCLIPLoader,clip_l.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22clip_l.safetensors%22
-4,42,UNETLoader,flux1-fill-dev.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22flux1-fill-dev.safetensors%22
-5,83,StyleModelLoader,flux1-redux-dev.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22flux1-redux-dev.safetensors%22
-6,163,SAMModelLoader (segment anything),sam_vit_h (2.56GB),,,,https://www.bing.com/search?q=site:huggingface.co+%22sam_vit_h+(2.56GB)%22
-7,84,CLIPVisionLoader,sigclip_vision_patch14_384.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22sigclip_vision_patch14_384.safetensors%22
-8,44,DualCLIPLoader,t5xxl_fp8_e4m3fn.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22t5xxl_fp8_e4m3fn.safetensors%22

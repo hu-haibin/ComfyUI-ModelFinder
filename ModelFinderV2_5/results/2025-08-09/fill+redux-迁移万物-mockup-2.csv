@@ -1,7 +1,0 @@
-﻿序号,节点ID,节点类型,文件名,状态,下载链接,镜像链接,搜索链接
-1,43,VAELoader,ae.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22flux+vae.safetensors%22
-2,44,DualCLIPLoader,clip_l.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22clip_l.safetensors%22
-3,42,UNETLoader,flux1-fill-dev.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22flux1-fill-dev.safetensors%22
-4,83,StyleModelLoader,flux1-redux-dev.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22flux1-redux-dev.safetensors%22
-5,84,CLIPVisionLoader,sigclip_vision_patch14_384.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22sigclip_vision_patch14_384.safetensors%22
-6,44,DualCLIPLoader,t5xxl_fp8_e4m3fn.safetensors,,,,https://www.bing.com/search?q=site:huggingface.co+%22t5xxl_fp8_e4m3fn.safetensors%22
