@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+app.log
+ModelFinderV2_*/__pycache__/
+ModelFinderV2_*/results/
