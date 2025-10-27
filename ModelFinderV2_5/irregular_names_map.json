@@ -1,0 +1,86 @@
+[
+  {
+    "id": "8f37fa8c-e6c0-4895-a8db-a5b3b1a6f59d",
+    "original_name": "F.1- 光影氛围-室内背景_V1",
+    "corrected_name": "F.1- 光影氛围-室内背景",
+    "notes": ""
+  },
+  {
+    "id": "1da39092-ec25-459a-a939-15676c2e0c15",
+    "original_name": "FLUX_奶油中古风家居_奶油中古风家居_v1.0",
+    "corrected_name": "FLUX_奶油中古风家居_奶油中古风家居",
+    "notes": ""
+  },
+  {
+    "id": "a7282868-a6bb-4ac0-9e14-7f29f1fd2283",
+    "original_name": "QLCD-原木风奶油风室内设计Flux_温馨小户型设计宜家_v1.0",
+    "corrected_name": "QLCD-原木风奶油风室内设计Flux_温馨小户型设计宜家",
+    "notes": ""
+  },
+  {
+    "id": "39ea7a23-e3ff-450f-9f48-37f2f069b83f",
+    "original_name": "凉一室内极致写实极简风_侘寂风照片级写实建筑_体验版",
+    "corrected_name": "侘寂风照片级写实建筑",
+    "notes": ""
+  },
+  {
+    "id": "b237a868-eab3-4016-b825-6bab11879a53",
+    "original_name": "室内设计-极简客厅_v1.0",
+    "corrected_name": "室内设计-极简客厅",
+    "notes": ""
+  },
+  {
+    "id": "6cb75446-5fed-48ea-a179-f262f5fc5c21",
+    "original_name": "F1照片级法式室内_v1.0",
+    "corrected_name": "F1照片级法式室内",
+    "notes": ""
+  },
+  {
+    "id": "7286738c-adcd-45ae-9058-aa1ec1f0124f",
+    "original_name": "基础算法_F.1",
+    "corrected_name": "F.1基础算法模型-哩布在线可运行",
+    "notes": ""
+  },
+  {
+    "id": "0e3be39e-e601-4d09-b965-ff438f922f09",
+    "original_name": "F.1_Depth-fp16_1.0",
+    "corrected_name": "F.1 Depth-fp16 Checkpoint-热点推荐官",
+    "notes": ""
+  },
+  {
+    "id": "ae0d2d03-0bc5-4f44-82bd-d7b9397222f0",
+    "original_name": "MJMangaSDXL.safetensors",
+    "corrected_name": "MJMangaSDXL",
+    "notes": ""
+  },
+  {
+    "id": "3e822de2-f726-477f-8d9f-a5fe7544abe7",
+    "original_name": "ae.safetensors",
+    "corrected_name": "flux vae.safetensors",
+    "notes": ""
+  },
+  {
+    "id": "d39c21c6-9eb6-4ba9-a3d4-b926e7132bd8",
+    "original_name": "F.1-小红书风格_最强网感｜穿搭 | 光效 | 彩妆_穿搭2.0",
+    "corrected_name": "F.1-小红书风格_最强网感｜穿搭 | 光效 |",
+    "notes": ""
+  },
+  {
+    "id": "0db995ac-f1e3-4ee0-afa5-261e16173969",
+    "original_name": "北岸-韩国精致甜辣妹脸模-允芷_v1.safetensors",
+    "corrected_name": "韩国精致甜辣妹脸模-允芷",
+    "notes": ""
+  },
+  {
+    "id": "7f9ffb9b-f01a-485c-91fd-66dd80b3a3f3",
+    "original_name": "幻彩心绘Flux_彩铅线描插画风格_v1.0.safetensors",
+    "corrected_name": "幻彩心绘Flux_彩铅线描插画风格",
+    "notes": ""
+  },
+  {
+    "id": "2d6ec6b8-a701-4898-a69d-dbfcd4ca58eb",
+    "original_name": "F.1-Fill-fp16_Inpaint&Outpaint_1.0",
+    "corrected_name": "F.1-Fill-fp16_Inpaint&Outpaint",
+    "notes": ""
+  }
+]
