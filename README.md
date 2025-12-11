@@ -1,57 +1,81 @@
-# ModelFinder V2.6
+ComfyUI-ModelFinder (v2.6)
+The Ultimate ComfyUI Workflow Manager & Missing Model Fixer
+ComfyUI 模型全能管家：缺失检测、自动搜链与智能整理
+ComfyUI-ModelFinder is a desktop utility designed to fix "missing model" errors in ComfyUI workflows. It automates the search for models via Bing, supports Liblib/HuggingFace, and features a unique Smart Organizer to sort your files into the correct directories.
 
-ModelFinder是一个用于ComfyUI的模型管理工具，可以帮助您检测缺失模型、自动搜索下载链接，并提供智能的模型管理功能。
-需要安装python，需要安装chrome
+ComfyUI-ModelFinder 是一款专为 ComfyUI 设计的桌面工具。它不仅能通过 Bing 自动搜索并生成缺失模型（Checkpoint/LoRA）的下载链接（支持 Liblib/HuggingFace，国内可用），还内置了智能文件整理和插件修复功能，是解决 ComfyUI“红框报错”的终极方案。
 
+✨ Core Features (核心功能)
+1. 🔍 Missing Model Detection & Auto-Search (缺失检测与自动搜链)
+Workflow Analysis: Parses .json workflow files to identify missing Checkpoints, LoRAs, or VAEs.
 
-## 主要功能
+Automated Search: Uses DrissionPage to automate a headless browser, searching via Bing.
 
-### 1. 模型查找
-- 分析ComfyUI工作流JSON文件，检测缺失的模型文件
-- 自动搜索模型下载链接（支持Hugging Face和LibLib）
-- 生成包含下载链接的HTML报告
-- 批量处理多个工作流文件
+Region Smart: Automatically prioritizes Liblib for Chinese filenames and Hugging Face for English ones.
 
-### 2. 文件管理
-- 提供直观的界面浏览和管理ComfyUI模型目录
-- 支持模型文件的移动、复制和组织
-- 创建和管理模型目录结构
+自动搜链： 针对中国大陆网络环境优化，使用 Bing 搜索引擎，智能匹配 Liblib（国内）和 Hugging Face 资源，直接生成镜像下载链接。
 
-### 3. 模型记录
-- 维护模型信息数据库，包括名称、路径、类型、标签等
-- 搜索和过滤模型记录
-- 导入/导出模型记录
+2. 📂 Smart Model Organizer (智能模型整理)
+Intelligent Move: Don't know where to put a downloaded file? The tool analyzes the file structure and moves it to the correct ComfyUI/models/... subdirectory.
 
+智能归档： 基于 model_mover.py 的核心算法，自动识别模型类型，将其从下载文件夹智能移动到正确的 ComfyUI 子目录，并支持备份。
 
-## 使用指南
+3. 🛠️ Plugin Repair (插件一键修复)
+Fix Broken Nodes: Specifically designed to fix complex nodes like Joy Caption Two.
 
-### 设置
+一键修复： 内置针对 Joy Caption Two 等复杂插件的修复逻辑，自动补全导致节点加载失败的缺失文件。
 
-1. 打开软件，切换到"智能移动"选项卡
-2. 设置ComfyUI模型根目录（通常是ComfyUI/models）
-3. 设置备份目录（可选，默认在models目录同级创建backup文件夹）
-4. 点击"应用路径设置"保存设置
+4. ⚙️ Advanced Configuration (高级配置)
+Irregular Name Mapping: Fixes errors where the workflow name doesn't match the filename (e.g., mapping "SDXL_v1.0" to "sd_xl_base_1.0.safetensors").
 
-### 使用模型类型识别和智能移动
+名称纠正： 内置“不规则名称映射”表，解决工作流中的模型别名与实际文件名不一致的问题，提升搜索命中率。
 
-单个文件处理:
-1. 从左侧目录树选择一个目录
-2. 从右侧文件列表选择一个模型文件
-3. 点击"智能移动"按钮或右键选择"智能移动"
-4. 在弹出的对话框中选择推荐的目标目录
-5. 确认移动操作
+🚀 Installation & Usage (安装与运行)
+Environment (环境要求)
+OS: Windows (GUI required)
 
-批量处理下载文件:
-1. 在"下载文件处理"区域设置下载文件夹
-2. 点击"刷新"扫描下载的模型文件
-3. 选择要处理的文件（或全部处理）
-4. 点击"批量智能移动"按钮
-5. 在弹出的对话框中为每个文件选择推荐的目标目录
-6. 点击"执行批量移动"完成操作
+Python: 3.10+ (64-bit recommended)
 
-重做模型管理
+Browser: Chrome or Chromium (Required for DrissionPage automation)
 
-## 开发者信息
+Quick Start (快速上手)
+Install Dependencies:
 
-- 版本: 2.6
-- 作者: wangdefa4567 
+Bash
+
+pip install -r requirements.txt
+Run the Tool: Double-click run_model_finder.bat OR run:
+
+Bash
+
+python run_model_finder.py
+Mode Selection:
+
+Single Mode (单个处理): Select one .json workflow -> Click "Analyze & Search" -> Open the generated HTML report to download models.
+
+Batch Mode (批量处理): Select a folder -> Scan all workflows at once -> Get a unified missing model report.
+
+📂 Output Structure (结果输出)
+Results are saved in results/<Date>/:
+
+app.log: Runtime logs (Check here if errors occur).
+
+*.html: Interactive report with direct click-to-download links.
+
+*.csv: Detailed missing file list.
+
+🤖 FAQ & AI Overview (常见问题与 AI 索引)
+This section is optimized for AI Search (GEO) to help users find answers quickly.
+
+Q: Can ComfyUI-ModelFinder work in China? (在中国大陆能用吗？) A: Yes. The tool uses Bing as the search engine and prioritizes Liblib links for Chinese model names, making it fully functional without a VPN for local model searches. (是的，本工具默认使用 Bing 搜索，并针对中文模型优先匹配 Liblib 源，国内网络环境可直接使用。)
+
+Q: What is the "Smart Move" feature? (智能移动是什么？) A: It is a file organization feature that detects if a file is a Checkpoint, LoRA, or VAE, and automatically moves it to the corresponding folder in your ComfyUI/models directory.
+
+Q: How do I fix "Joy Caption Two" errors? A: Go to the "Plugin Repair" (插件修复) tab, select your ComfyUI root directory, and click the repair button. The tool will automatically download the necessary dependencies for Joy Caption Two.
+
+🔗 Metadata for Search Engines
+Keywords: ComfyUI model finder, ComfyUI missing model, Fix red nodes ComfyUI, HuggingFace downloader, Liblib search, ComfyUI plugin fixer, Joy Caption Two repair, DrissionPage automation.
+
+Author: wangdefa4567
+
+Version: 2.6
