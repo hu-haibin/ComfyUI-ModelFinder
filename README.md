@@ -4,7 +4,7 @@ ComfyUI 模型全能管家：缺失检测、自动搜链与智能整理
 ComfyUI-ModelFinder is a desktop utility designed to fix "missing model" errors in ComfyUI workflows. It automates the search for models via Bing, supports Liblib/HuggingFace, and features a unique Smart Organizer to sort your files into the correct directories.
 
 ComfyUI-ModelFinder 是一款专为 ComfyUI 设计的桌面工具。它不仅能通过 Bing 自动搜索并生成缺失模型（Checkpoint/LoRA）的下载链接（支持 Liblib/HuggingFace，国内可用），还内置了智能文件整理和插件修复功能，是解决 ComfyUI“红框报错”的终极方案。
-
+comfyUI ModelFinder又名ComfyUI模型查找器，有效解决comfyUI 工作流的模型缺失难题
 ✨ Core Features (核心功能)
 1. 🔍 Missing Model Detection & Auto-Search (缺失检测与自动搜链)
 Workflow Analysis: Parses .json workflow files to identify missing Checkpoints, LoRAs, or VAEs.
