@@ -3,3 +3,4 @@ __pycache__/
 app.log
 ModelFinderV2_*/__pycache__/
 ModelFinderV2_*/results/
+.kiro/
