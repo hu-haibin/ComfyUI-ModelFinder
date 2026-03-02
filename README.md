@@ -27,6 +27,8 @@
 > - ✅ **Windows Fluent Design 现代 UI，深色/浅色主题**
 >
 > 👉 **[立即下载 ModelFinder Launcher（免费）](https://github.com/hu-haibin/ModelFinder-Releases/releases/latest)**
+>
+> ![ModelFinder Launcher 主界面](https://raw.githubusercontent.com/hu-haibin/ModelFinder-Releases/main/screenshots/home.png)
 
 ---
 
