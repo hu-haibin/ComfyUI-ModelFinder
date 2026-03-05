@@ -8,7 +8,7 @@ import random
 
 # Import utilities and file manager directly, as Model handles core logic
 from .utils import get_mirror_link, create_html_view, find_chrome_path
-from .file_manager import get_output_path
+from .file_manager import get_output_path, get_results_folder
 from .model_config_manager import ModelConfigManager
 
 try:
@@ -162,6 +162,90 @@ class AnalysisModel:
             logger.debug(f"Decision name '{name_for_decision}' suggests non-Chinese model, using Hugging Face search with query term '{term_for_query_embedding}'.")
             return f"https://www.bing.com/?setlang=en-US", f'site:huggingface.co "{term_for_query_embedding}"'
 
+    def _get_search_cache_path(self):
+        """Returns a persistent cache file path for search results."""
+        try:
+            cache_root = get_results_folder()
+            os.makedirs(cache_root, exist_ok=True)
+            return os.path.join(cache_root, "search_cache.json")
+        except Exception:
+            # Fallback to module directory if results directory resolution fails.
+            return os.path.join(os.path.dirname(os.path.abspath(__file__)), "search_cache.json")
+
+    def _load_search_cache(self):
+        cache_path = self._get_search_cache_path()
+        if not os.path.exists(cache_path):
+            return {}
+
+        try:
+            with open(cache_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            logger.warning("Failed to load search cache, cache will be recreated.", exc_info=True)
+        return {}
+
+    def _save_search_cache(self, cache_data):
+        cache_path = self._get_search_cache_path()
+        tmp_path = f"{cache_path}.tmp"
+        try:
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                json.dump(cache_data, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, cache_path)
+            return True
+        except Exception:
+            logger.warning("Failed to save search cache.", exc_info=True)
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except Exception:
+                pass
+            return False
+
+    def _build_search_cache_key(self, search_site, search_term_query, node_type):
+        site = "liblib" if search_site == "liblib" else "hf"
+        normalized_term = (search_term_query or "").strip().lower()
+        normalized_node_type = (node_type or "").strip().lower()
+        return f"{site}|{normalized_term}|{normalized_node_type}"
+
+    def _is_cache_entry_valid(self, cache_entry):
+        if not isinstance(cache_entry, dict):
+            return False
+
+        updated_at = cache_entry.get('updated_at')
+        if not isinstance(updated_at, (int, float)):
+            return False
+
+        # Keep successful entries longer than misses.
+        has_url = bool((cache_entry.get('url') or '').strip())
+        ttl_seconds = 30 * 24 * 3600 if has_url else 12 * 3600
+        return (time.time() - float(updated_at)) <= ttl_seconds
+
+    def _apply_search_result_to_row(self, df, df_idx, search_site, found_url, status):
+        """Applies one search result row update in a normalized way."""
+        found_url = (found_url or '').strip()
+        status = (status or '').strip()
+
+        if search_site == 'liblib':
+            df.loc[df_idx, '下载链接'] = ''
+            df.loc[df_idx, '镜像链接'] = ''
+            df.loc[df_idx, '搜索链接'] = found_url
+            df.loc[df_idx, '状态'] = status or ('已处理' if found_url else '未找到LibLib')
+            return
+
+        # Hugging Face branch
+        df.loc[df_idx, '搜索链接'] = ''
+        if found_url:
+            resolved_url = found_url.replace("/blob/", "/resolve/") if "/blob/" in found_url else found_url
+            df.loc[df_idx, '下载链接'] = resolved_url
+            df.loc[df_idx, '镜像链接'] = get_mirror_link(found_url)
+            df.loc[df_idx, '状态'] = status or '已处理'
+        else:
+            df.loc[df_idx, '下载链接'] = ''
+            df.loc[df_idx, '镜像链接'] = ''
+            df.loc[df_idx, '状态'] = status or '未找到HF'
+
     def find_missing_models(self, workflow_file):
         logger.info(f"Analyzing workflow file: {workflow_file}")
         base_dir = os.path.dirname(os.path.abspath(workflow_file))
@@ -279,138 +363,261 @@ class AnalysisModel:
     def search_model_links(self, csv_file, progress_callback=None):
         logger.info(f"Starting model link search for CSV: {csv_file}")
         if pd is None or ChromiumPage is None:
-             logger.error("Search cannot proceed: Missing pandas or DrissionPage."); return False
+            logger.error("Search cannot proceed: Missing pandas or DrissionPage.")
+            return False
+
+        col_status = '\u72b6\u6001'
+        col_download = '\u4e0b\u8f7d\u94fe\u63a5'
+        col_mirror = '\u955c\u50cf\u94fe\u63a5'
+        col_search = '\u641c\u7d22\u94fe\u63a5'
+        col_file = '\u6587\u4ef6\u540d'
+        col_node_type = '\u8282\u70b9\u7c7b\u578b'
+
+        status_processed = '\u5df2\u5904\u7406'
+        status_no_search_box = '\u641c\u7d22\u9519\u8bef(\u65e0\u641c\u7d22\u6846)'
+        status_no_result_area = '\u672a\u627e\u5230(\u65e0\u7ed3\u679c\u533a)'
+        status_no_link = '\u672a\u627e\u5230(\u65e0\u94fe\u63a5)'
+        status_search_exception = '\u641c\u7d22\u9519\u8bef(\u5f02\u5e38)'
+        status_not_found_liblib = '\u672a\u627e\u5230LibLib'
+        status_not_found_hf = '\u672a\u627e\u5230HF'
+        status_non_direct_liblib = '\u627e\u5230\u641c\u7d22\u94fe\u63a5\u4f46\u975e\u76f4\u63a5LibLib\u94fe\u63a5'
+        status_browser_unavailable = '\u641c\u7d22\u9519\u8bef(\u6d4f\u89c8\u5668\u4e0d\u53ef\u7528)'
+
         try:
-            # (CSV 读取和列处理逻辑保持不变，确保'文件名'和'节点类型'列存在且为字符串)
-            string_cols = ['状态', '下载链接', '镜像链接', '搜索链接', '文件名', '节点类型']
-            df = pd.read_csv(csv_file, encoding='utf-8-sig', dtype={col: str for col in string_cols}, keep_default_na=False, na_values=[''])
-            for col in ['文件名', '状态', '下载链接', '镜像链接', '搜索链接', '节点类型']: # 确保这些列存在
-                if col not in df.columns: df[col] = ''
+            string_cols = [col_status, col_download, col_mirror, col_search, col_file, col_node_type]
+            df = pd.read_csv(
+                csv_file,
+                encoding='utf-8-sig',
+                dtype={col: str for col in string_cols},
+                keep_default_na=False,
+                na_values=['']
+            )
+            for col in string_cols:
+                if col not in df.columns:
+                    df[col] = ''
                 df[col] = df[col].fillna('').astype(str)
 
-            search_tasks = []
+            save_interval = 20
+            rows_since_save = 0
+            cache = self._load_search_cache()
+            cache_dirty = False
+
+            grouped_tasks = {}
+            cache_hits = 0
+
             for index, row in df.iterrows():
-                original_name_from_csv = row.get('文件名', '')
-                if not original_name_from_csv: continue
-                status = row.get('状态', '')
-                hf_link = row.get('下载链接', '')
-                search_or_liblib_link = row.get('搜索链接', '')
-                is_processed = (status == '已处理')
+                original_name_from_csv = row.get(col_file, '')
+                if not original_name_from_csv:
+                    continue
+
+                status = row.get(col_status, '')
+                hf_link = row.get(col_download, '')
+                search_or_liblib_link = row.get(col_search, '')
+                is_processed = (status == status_processed)
                 has_valid_link = hf_link or (search_or_liblib_link.startswith('http') and 'liblib.art' in search_or_liblib_link)
-                if is_processed and has_valid_link: continue
+                if is_processed and has_valid_link:
+                    continue
 
                 processed_names = self._process_name_for_search(original_name_from_csv)
-                search_tasks.append({
-                    'original_name_csv': original_name_from_csv,
-                    'name_for_decision': processed_names['mapped'],
-                    'search_term_query': processed_names['final_search_term'],
-                    'df_index': index, 'node_type': row.get('节点类型', '')
-                })
-            
-            if not search_tasks: logger.info("No keywords require searching."); # 继续生成HTML
-            else: logger.info(f"Found {len(search_tasks)} keywords to search.")
+                search_site = 'liblib' if self._contains_chinese(processed_names['mapped']) else 'hf'
+                node_type = row.get(col_node_type, '')
+                cache_key = self._build_search_cache_key(search_site, processed_names['final_search_term'], node_type)
 
-            # (浏览器设置逻辑不变)
-            chrome_path_to_use = (self.controller.get_loaded_chrome_path() if self.controller and hasattr(self.controller, 'get_loaded_chrome_path') else None) or find_chrome_path()
-            if not chrome_path_to_use and search_tasks: # 只有在需要搜索时才强制要求浏览器
-                logger.error("Chrome browser not found. Cannot perform search.");
-            
-            page = None
-            if chrome_path_to_use and search_tasks: # 仅当需要搜索且浏览器存在时初始化
-                co = ChromiumOptions().set_browser_path(chrome_path_to_use)
-                co.set_argument('--disable-infobars').set_argument('--no-sandbox').set_argument('--start-maximized')
-                # co.set_argument('--headless')
-                try:
-                    page = ChromiumPage(co)
-                    logger.info("Browser page initialized.")
-                except Exception as browser_e:
-                    logger.error(f"Failed to initialize browser: {browser_e}")
-                    page = None # 确保page为None，后续不会尝试使用
+                cached_entry = cache.get(cache_key)
+                if self._is_cache_entry_valid(cached_entry):
+                    self._apply_search_result_to_row(
+                        df,
+                        index,
+                        search_site,
+                        cached_entry.get('url', ''),
+                        cached_entry.get('status', '')
+                    )
+                    cache_hits += 1
+                    rows_since_save += 1
+                    continue
+                elif cached_entry is not None:
+                    cache.pop(cache_key, None)
+                    cache_dirty = True
 
-            if page: # 只有当浏览器成功初始化后才进行搜索循环
-                total_tasks = len(search_tasks)
-                for i, task in enumerate(search_tasks):
-                    if progress_callback: progress_callback(i + 1, total_tasks)
-                    logger.info(f"Searching ({i+1}/{total_tasks}): Query='{task['search_term_query']}' (Original: '{task['original_name_csv']}')")
-                    
-                    bing_url, site_query = self._get_search_url(task['name_for_decision'], task['search_term_query'], task['node_type'])
-                    df_idx = task['df_index']
+                if cache_key not in grouped_tasks:
+                    grouped_tasks[cache_key] = {
+                        'cache_key': cache_key,
+                        'search_site': search_site,
+                        'name_for_decision': processed_names['mapped'],
+                        'search_term_query': processed_names['final_search_term'],
+                        'node_type': node_type,
+                        'original_name_csv': original_name_from_csv,
+                        'df_indices': [index],
+                    }
+                else:
+                    grouped_tasks[cache_key]['df_indices'].append(index)
+
+            if rows_since_save >= save_interval:
+                df.to_csv(csv_file, index=False, encoding='utf-8-sig')
+                rows_since_save = 0
+
+            search_tasks = list(grouped_tasks.values())
+            if not search_tasks:
+                logger.info(f"No keywords require searching. Cache hits={cache_hits}.")
+                if progress_callback:
+                    progress_callback(1, 1)
+            else:
+                logger.info(
+                    f"Unique search tasks: {len(search_tasks)}, cache hits: {cache_hits}, "
+                    f"deduped rows: {sum(len(t['df_indices']) for t in search_tasks)}"
+                )
+
+            chrome_path_to_use = (
+                self.controller.get_loaded_chrome_path()
+                if self.controller and hasattr(self.controller, 'get_loaded_chrome_path')
+                else None
+            ) or find_chrome_path()
+
+            if not chrome_path_to_use and search_tasks:
+                logger.error("Chrome browser not found. Cannot perform search.")
+                for task in search_tasks:
+                    for df_idx in task['df_indices']:
+                        self._apply_search_result_to_row(df, df_idx, task['search_site'], '', status_browser_unavailable)
+                        rows_since_save += 1
+            else:
+                page = None
+                if chrome_path_to_use and search_tasks:
+                    co = ChromiumOptions().set_browser_path(chrome_path_to_use)
+                    co.set_argument('--disable-infobars').set_argument('--no-sandbox').set_argument('--start-maximized')
                     try:
-                        page.get(bing_url, timeout=15)
-                        time.sleep(random.uniform(0.5,1.0)) # 减少等待
-                        search_box = page.ele("#sb_form_q", timeout=5)
-                        if not search_box: df.loc[df_idx, '状态'] = '搜索错误(无搜索框)'; continue
-                        search_box.clear(); search_box.input(site_query)
-                        time.sleep(random.uniform(0.2,0.5))
-                        
-                        s_button = page.ele('#search_icon',timeout=3) or page.ele('xpath://button[@type="submit"]', timeout=3)
-                        if s_button: s_button.click()
-                        else: page.run_js("document.querySelector('#sb_form').submit();")
-                        page.wait.load_start(timeout=10)
+                        page = ChromiumPage(co)
+                        logger.info("Browser page initialized.")
+                    except Exception as browser_e:
+                        logger.error(f"Failed to initialize browser: {browser_e}")
+                        page = None
 
-                        results_container = page.ele('#b_results', timeout=10)
-                        if not results_container: df.loc[df_idx, '状态'] = '未找到(无结果区)'; continue
-                        
-                        first_link = results_container.ele("xpath:.//h2/a")
-                        if first_link:
-                            found_url = first_link.attr("href")
-                            logger.info(f"Found: '{first_link.text}' -> {found_url}")
-                            # (填充df的逻辑不变，基于 task['name_for_decision'] 判断中文/HF)
-                            if self._contains_chinese(task['name_for_decision']): # LibLib
-                                if found_url and 'liblib.art' in found_url:
-                                    # 确保这是一个详情页面URL而不是搜索结果
-                                    if 'bing.com' in found_url or 'search' in found_url.lower():
-                                        # 尝试从链接文本或者页面内容中提取实际的LibLib URL
-                                        liblib_url = None
-                                        try:
-                                            # 先尝试点击链接，看能否找到实际的LibLib URL
-                                            first_link.click()
-                                            page.wait.load_start(timeout=10)
-                                            current_url = page.url
-                                            if 'liblib.art' in current_url:
-                                                liblib_url = current_url
-                                                logger.info(f"Extracted real LibLib URL by following link: {liblib_url}")
-                                            else:
-                                                # 如果点击后不是LibLib网站，尝试在结果中寻找直接的LibLib链接
-                                                page.back()
-                                                liblib_links = results_container.eles("xpath:.//a[contains(@href, 'liblib.art')]")
-                                                if liblib_links:
-                                                    liblib_url = liblib_links[0].attr("href")
-                                                    logger.info(f"Found direct LibLib link in results: {liblib_url}")
-                                        except Exception as link_e:
-                                            logger.error(f"Error extracting LibLib URL: {link_e}")
-                                            page.get(bing_url, timeout=15)  # 返回搜索页
-                                            
-                                        if liblib_url:
-                                            df.loc[df_idx, '搜索链接'] = liblib_url
-                                            df.loc[df_idx, '状态'] = '已处理'
-                                        else:
-                                            df.loc[df_idx, '搜索链接'] = found_url
-                                            df.loc[df_idx, '状态'] = '找到搜索链接但非直接LibLib链接'
+                if page:
+                    total_tasks = len(search_tasks)
+                    for i, task in enumerate(search_tasks):
+                        if progress_callback:
+                            progress_callback(i + 1, total_tasks)
+                        logger.info(
+                            f"Searching ({i + 1}/{total_tasks}): Query='{task['search_term_query']}' "
+                            f"(Original: '{task['original_name_csv']}')"
+                        )
+
+                        bing_url, site_query = self._get_search_url(
+                            task['name_for_decision'],
+                            task['search_term_query'],
+                            task['node_type']
+                        )
+
+                        found_url = ''
+                        status_text = status_not_found_liblib if task['search_site'] == 'liblib' else status_not_found_hf
+
+                        try:
+                            page.get(bing_url, timeout=15)
+                            time.sleep(random.uniform(0.2, 0.5))
+
+                            search_box = page.ele("#sb_form_q", timeout=5)
+                            if not search_box:
+                                status_text = status_no_search_box
+                            else:
+                                search_box.clear()
+                                search_box.input(site_query)
+                                time.sleep(random.uniform(0.1, 0.25))
+
+                                s_button = page.ele('#search_icon', timeout=3) or page.ele('xpath://button[@type="submit"]', timeout=3)
+                                if s_button:
+                                    s_button.click()
+                                else:
+                                    page.run_js("document.querySelector('#sb_form').submit();")
+
+                                page.wait.load_start(timeout=10)
+                                results_container = page.ele('#b_results', timeout=10)
+
+                                if not results_container:
+                                    status_text = status_no_result_area
+                                else:
+                                    first_link = results_container.ele("xpath:.//h2/a")
+                                    if not first_link:
+                                        status_text = status_no_link
                                     else:
-                                        df.loc[df_idx, '搜索链接'] = found_url
-                                        df.loc[df_idx, '状态'] = '已处理'
-                                    df.loc[df_idx, '下载链接'] = ''
-                                    df.loc[df_idx, '镜像链接'] = ''
-                                else: 
-                                    df.loc[df_idx, '状态'] = '未找到LibLib'
-                            else: # HuggingFace
-                                if found_url and 'huggingface.co' in found_url:
-                                    df.loc[df_idx, '下载链接'] = found_url.replace("/blob/", "/resolve/") if "/blob/" in found_url else found_url
-                                    df.loc[df_idx, '镜像链接'] = get_mirror_link(found_url)
-                                    df.loc[df_idx, '搜索链接'] = ''; df.loc[df_idx, '状态'] = '已处理'
-                                else: df.loc[df_idx, '状态'] = '未找到HF'
-                        else: df.loc[df_idx, '状态'] = '未找到(无链接)'
-                    except Exception as search_e: logger.error(f"Error searching for '{task['search_term_query']}'", exc_info=True); df.loc[df_idx, '状态'] = '搜索错误(异常)'
-                    finally:
-                        df.to_csv(csv_file, index=False, encoding='utf-8-sig') # Save after each
-                        time.sleep(random.uniform(0.8, 1.8)) # Shorter delay
-                if page: page.quit()
+                                        candidate_url = (first_link.attr("href") or '').strip()
+                                        logger.info(f"Found: '{first_link.text}' -> {candidate_url}")
+
+                                        if task['search_site'] == 'liblib':
+                                            if candidate_url and 'liblib.art' in candidate_url:
+                                                if 'bing.com' in candidate_url or 'search' in candidate_url.lower():
+                                                    liblib_url = ''
+                                                    try:
+                                                        first_link.click()
+                                                        page.wait.load_start(timeout=10)
+                                                        current_url = (page.url or '').strip()
+                                                        if 'liblib.art' in current_url:
+                                                            liblib_url = current_url
+                                                        else:
+                                                            page.back()
+                                                            liblib_links = results_container.eles("xpath:.//a[contains(@href, 'liblib.art')]")
+                                                            for item in liblib_links:
+                                                                direct_url = (item.attr("href") or '').strip()
+                                                                if direct_url and 'liblib.art' in direct_url:
+                                                                    liblib_url = direct_url
+                                                                    break
+                                                    except Exception:
+                                                        logger.debug("Failed to resolve LibLib redirect URL.", exc_info=True)
+
+                                                    if liblib_url:
+                                                        found_url = liblib_url
+                                                        status_text = status_processed
+                                                    else:
+                                                        found_url = candidate_url
+                                                        status_text = status_non_direct_liblib
+                                                else:
+                                                    found_url = candidate_url
+                                                    status_text = status_processed
+                                            else:
+                                                liblib_links = results_container.eles("xpath:.//a[contains(@href, 'liblib.art')]")
+                                                for item in liblib_links:
+                                                    direct_url = (item.attr("href") or '').strip()
+                                                    if direct_url and 'liblib.art' in direct_url:
+                                                        found_url = direct_url
+                                                        break
+                                                status_text = status_processed if found_url else status_not_found_liblib
+                                        else:
+                                            if candidate_url and 'huggingface.co' in candidate_url:
+                                                found_url = candidate_url
+                                                status_text = status_processed
+                                            else:
+                                                status_text = status_not_found_hf
+                        except Exception:
+                            logger.error(f"Error searching for '{task['search_term_query']}'", exc_info=True)
+                            status_text = status_search_exception
+                        finally:
+                            for df_idx in task['df_indices']:
+                                self._apply_search_result_to_row(df, df_idx, task['search_site'], found_url, status_text)
+                            rows_since_save += len(task['df_indices'])
+
+                            cache[task['cache_key']] = {
+                                'site': task['search_site'],
+                                'url': found_url,
+                                'status': status_text,
+                                'updated_at': time.time(),
+                            }
+                            cache_dirty = True
+
+                            if rows_since_save >= save_interval:
+                                df.to_csv(csv_file, index=False, encoding='utf-8-sig')
+                                rows_since_save = 0
+
+                            time.sleep(random.uniform(0.15, 0.35))
+
+                    page.quit()
 
             df.to_csv(csv_file, index=False, encoding='utf-8-sig')
+            if cache_dirty:
+                self._save_search_cache(cache)
+
             html_file = create_html_view(csv_file)
             return html_file if html_file else True
-        except Exception as e: logger.error(f"Critical error in search_model_links for {csv_file}", exc_info=True); return False
+        except Exception:
+            logger.error(f"Critical error in search_model_links for {csv_file}", exc_info=True)
+            return False
 
 
     def batch_process_workflows(self, directory, file_pattern="*.json", progress_callback=None):
