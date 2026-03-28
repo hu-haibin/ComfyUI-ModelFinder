@@ -89,8 +89,8 @@ class AppView:
         """设置应用程序的图标。"""
         try:
             # 修正路径，假设 Modelfinder.ico 在项目根目录的上一级
-            # 或者更可靠的是，将其放在 ModelFinderV2_5 包内，并使用相对路径
-            # 例如，如果 icon 在 ModelFinderV2_5/assets/Modelfinder.ico
+            # 或者更可靠的是，将其作为包内资源，并使用相对路径
+            # 例如，可以改成从当前文件所在目录拼出 assets/Modelfinder.ico
             # base_dir = os.path.dirname(__file__) # 当前文件(view.py)所在目录
             # icon_path = os.path.join(base_dir, "assets", "Modelfinder.ico")
             # 为简单起见，我们先假设它在项目根目录
@@ -1601,4 +1601,3 @@ class AppView:
                 break
 
     # ... 原有代码 ...
-

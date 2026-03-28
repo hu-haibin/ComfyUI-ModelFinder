@@ -439,11 +439,14 @@ def create_html_view(csv_file):
             let html = '<tr>';
             for (const meta of columns) {
                 let arrow = '';
-                if (sortKey === meta.key) arrow = sortDir === 'asc' ? ' ?' : ' ?';
-                html += '<th onclick="toggleSort('' + meta.key.replace(/'/g, "\'") + '')">' + escapeHtml(meta.label) + arrow + '</th>';
+                if (sortKey === meta.key) arrow = sortDir === 'asc' ? ' ^' : ' v';
+                html += '<th data-col-key="' + escapeHtml(meta.key) + '">' + escapeHtml(meta.label) + arrow + '</th>';
             }
             html += '</tr>';
             head.innerHTML = html;
+            head.querySelectorAll('th[data-col-key]').forEach((th) => {
+                th.addEventListener('click', () => toggleSort(th.getAttribute('data-col-key') || ''));
+            });
         }
 
         function renderCell(row, key) {
@@ -561,7 +564,7 @@ def create_html_view(csv_file):
             }
 
             copyButton.disabled = true;
-            navigator.clipboard.writeText(links.join('\n')).then(() => {
+            navigator.clipboard.writeText(links.join('\\n')).then(() => {
                 copyMessage.textContent = 'Copied ' + links.length + ' mirror links';
                 setTimeout(() => {
                     copyMessage.textContent = '';

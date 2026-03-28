@@ -1,4 +1,4 @@
-# ModelFinderV2_5/irregular_names_model.py
+# irregular_names_model.py
 import os
 import json
 import logging
