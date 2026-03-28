@@ -143,6 +143,111 @@ class AnalysisModel:
         if not isinstance(text, str): return False
         return bool(self._chinese_char_pattern.search(text))
 
+    def _get_active_comfyui_path(self):
+        if not self.controller:
+            return ''
+
+        view = getattr(self.controller, 'view', None)
+        if view and hasattr(view, 'get_comfyui_path'):
+            comfyui_path = (view.get_comfyui_path() or '').strip()
+            if comfyui_path:
+                return comfyui_path
+
+        if hasattr(self.controller, 'get_loaded_comfyui_path'):
+            return (self.controller.get_loaded_comfyui_path() or '').strip()
+
+        return ''
+
+    def _get_comfyui_models_root(self):
+        comfyui_path = self._get_active_comfyui_path()
+        if not comfyui_path:
+            return ''
+
+        if os.path.isdir(comfyui_path) and os.path.basename(comfyui_path).lower() == 'models':
+            return comfyui_path
+
+        models_root = os.path.join(comfyui_path, 'models')
+        return models_root if os.path.isdir(models_root) else ''
+
+    def _build_comfyui_model_index(self, models_root):
+        if not models_root or not os.path.isdir(models_root):
+            self.model_folder = None
+            return None
+
+        cached_index = self.model_folder if isinstance(self.model_folder, dict) else None
+        if cached_index and cached_index.get('root') == models_root:
+            return cached_index
+
+        file_names = set()
+        file_stems = set()
+        dir_names = set()
+
+        for root, dirnames, filenames in os.walk(models_root):
+            for dirname in dirnames:
+                normalized_dir = dirname.strip().lower()
+                if normalized_dir:
+                    dir_names.add(normalized_dir)
+
+            for filename in filenames:
+                normalized_name = filename.strip().lower()
+                if not normalized_name:
+                    continue
+                file_names.add(normalized_name)
+                stem, _ = os.path.splitext(normalized_name)
+                if stem:
+                    file_stems.add(stem)
+
+        self.model_folder = {
+            'root': models_root,
+            'file_names': file_names,
+            'file_stems': file_stems,
+            'dir_names': dir_names,
+        }
+        logger.debug(
+            f"Indexed ComfyUI models root '{models_root}' with "
+            f"{len(file_names)} files and {len(dir_names)} directories."
+        )
+        return self.model_folder
+
+    def _model_exists_in_comfyui_index(self, filename, model_index):
+        if not filename or not model_index:
+            return False
+
+        normalized_name = os.path.basename(filename).strip().lower()
+        if not normalized_name:
+            return False
+
+        file_names = model_index.get('file_names', set())
+        file_stems = model_index.get('file_stems', set())
+        dir_names = model_index.get('dir_names', set())
+
+        stem, ext = os.path.splitext(normalized_name)
+        if ext:
+            return normalized_name in file_names
+
+        return (
+            normalized_name in file_names
+            or normalized_name in file_stems
+            or normalized_name in dir_names
+        )
+
+    def _local_reference_exists(self, filename, base_dir, model_extensions):
+        if not filename:
+            return False
+
+        if os.path.exists(filename) or os.path.exists(os.path.join(base_dir, filename)):
+            return True
+
+        _, ext = os.path.splitext(filename)
+        if ext:
+            return False
+
+        for model_ext in model_extensions:
+            if os.path.exists(f"{filename}{model_ext}") or os.path.exists(os.path.join(base_dir, f"{filename}{model_ext}")):
+                return True
+
+        return False
+
     def _get_search_url(self, name_for_decision, term_for_query_embedding, node_type=None):
         """
         Generates search URLs.
@@ -161,6 +266,49 @@ class AnalysisModel:
         else:
             logger.debug(f"Decision name '{name_for_decision}' suggests non-Chinese model, using Hugging Face search with query term '{term_for_query_embedding}'.")
             return f"https://www.bing.com/?setlang=en-US", f'site:huggingface.co "{term_for_query_embedding}"'
+
+    def _get_search_candidates(self, name_for_decision, term_for_query_embedding, node_type=None):
+        bing_url, primary_query = self._get_search_url(name_for_decision, term_for_query_embedding, node_type)
+        primary_site = 'liblib' if 'site:liblib.art' in primary_query else 'hf'
+
+        if name_for_decision == "ip-adapter.bin" and node_type == "InstantIDModelLoader":
+            return [{'search_site': 'hf', 'bing_url': bing_url, 'site_query': primary_query}]
+
+        normalized_term = (term_for_query_embedding or '').strip()
+        term_candidates = []
+        if normalized_term:
+            term_candidates.append(normalized_term)
+            stem, _ = os.path.splitext(normalized_term)
+            stem = stem.strip()
+            if stem and stem != normalized_term:
+                term_candidates.append(stem)
+        else:
+            term_candidates.append(normalized_term)
+
+        def build_query(search_site, query_term):
+            if search_site == 'liblib':
+                return f'site:liblib.art "{query_term}"'
+            return f'site:huggingface.co "{query_term}"'
+
+        candidates = []
+        seen = set()
+        site_order = [primary_site, 'hf' if primary_site == 'liblib' else 'liblib']
+        for search_site in site_order:
+            for query_term in term_candidates:
+                site_query = primary_query if (search_site == primary_site and query_term == normalized_term) else build_query(search_site, query_term)
+                if not site_query:
+                    continue
+                candidate_key = (search_site, site_query)
+                if candidate_key in seen:
+                    continue
+                seen.add(candidate_key)
+                candidates.append({
+                    'search_site': search_site,
+                    'bing_url': bing_url,
+                    'site_query': site_query,
+                })
+
+        return candidates
 
     def _get_search_cache_path(self):
         """Returns a persistent cache file path for search results."""
@@ -217,34 +365,45 @@ class AnalysisModel:
         if not isinstance(updated_at, (int, float)):
             return False
 
-        # Keep successful entries longer than misses.
-        has_url = bool((cache_entry.get('url') or '').strip())
-        ttl_seconds = 30 * 24 * 3600 if has_url else 12 * 3600
+        cached_url = (cache_entry.get('url') or '').strip()
+        if not cached_url:
+            return False
+
+        ttl_seconds = 30 * 24 * 3600
         return (time.time() - float(updated_at)) <= ttl_seconds
+
+    def _should_cache_result(self, found_url, status):
+        del status
+        return bool((found_url or '').strip())
 
     def _apply_search_result_to_row(self, df, df_idx, search_site, found_url, status):
         """Applies one search result row update in a normalized way."""
+        col_status = '\u72b6\u6001'
+        col_download = '\u4e0b\u8f7d\u94fe\u63a5'
+        col_mirror = '\u955c\u50cf\u94fe\u63a5'
+        col_search = '\u641c\u7d22\u94fe\u63a5'
+
         found_url = (found_url or '').strip()
         status = (status or '').strip()
 
         if search_site == 'liblib':
-            df.loc[df_idx, '下载链接'] = ''
-            df.loc[df_idx, '镜像链接'] = ''
-            df.loc[df_idx, '搜索链接'] = found_url
-            df.loc[df_idx, '状态'] = status or ('已处理' if found_url else '未找到LibLib')
+            df.loc[df_idx, col_download] = ''
+            df.loc[df_idx, col_mirror] = ''
+            df.loc[df_idx, col_search] = found_url
+            df.loc[df_idx, col_status] = status or ('\u5df2\u5904\u7406' if found_url else '\u672a\u627e\u5230LibLib')
             return
 
         # Hugging Face branch
-        df.loc[df_idx, '搜索链接'] = ''
+        df.loc[df_idx, col_search] = ''
         if found_url:
             resolved_url = found_url.replace("/blob/", "/resolve/") if "/blob/" in found_url else found_url
-            df.loc[df_idx, '下载链接'] = resolved_url
-            df.loc[df_idx, '镜像链接'] = get_mirror_link(found_url)
-            df.loc[df_idx, '状态'] = status or '已处理'
+            df.loc[df_idx, col_download] = resolved_url
+            df.loc[df_idx, col_mirror] = get_mirror_link(found_url)
+            df.loc[df_idx, col_status] = status or '\u5df2\u5904\u7406'
         else:
-            df.loc[df_idx, '下载链接'] = ''
-            df.loc[df_idx, '镜像链接'] = ''
-            df.loc[df_idx, '状态'] = status or '未找到HF'
+            df.loc[df_idx, col_download] = ''
+            df.loc[df_idx, col_mirror] = ''
+            df.loc[df_idx, col_status] = status or '\u672a\u627e\u5230HF'
 
     def find_missing_models(self, workflow_file):
         logger.info(f"Analyzing workflow file: {workflow_file}")
@@ -292,21 +451,22 @@ class AnalysisModel:
                 except Exception as node_e: logger.error(f"Error processing node ID {node.get('id', 'N/A')}", exc_info=True)
             
             if not file_references: return []
+            comfyui_models_root = self._get_comfyui_models_root()
+            comfyui_model_index = self._build_comfyui_model_index(comfyui_models_root)
             file_existence_cache = {}
             for ref in file_references:
                 try:
                     filename_to_check_existence = ref['filename_for_check']
                     original_filename_for_report = ref['original_filename']
-                    name, ext = os.path.splitext(filename_to_check_existence)
                     if filename_to_check_existence in file_existence_cache:
                         if not file_existence_cache[filename_to_check_existence]:
                             missing_files_list.append({'node_id': ref['node_id'], 'node_type': ref['node_type'], 'file_path': original_filename_for_report})
                         continue
-                    exists = os.path.exists(filename_to_check_existence) or os.path.exists(os.path.join(base_dir, filename_to_check_existence))
-                    if not exists and not ext:
-                         for model_ext in model_extensions:
-                             if os.path.exists(f"{filename_to_check_existence}{model_ext}") or os.path.exists(os.path.join(base_dir, f"{filename_to_check_existence}{model_ext}")):
-                                 exists = True; break
+
+                    exists = self._local_reference_exists(filename_to_check_existence, base_dir, model_extensions)
+                    if not exists and comfyui_model_index:
+                        exists = self._model_exists_in_comfyui_index(filename_to_check_existence, comfyui_model_index)
+
                     file_existence_cache[filename_to_check_existence] = exists
                     if not exists:
                         logger.debug(f"Missing file: Checked='{filename_to_check_existence}', Reported='{original_filename_for_report}'")
@@ -425,10 +585,11 @@ class AnalysisModel:
 
                 cached_entry = cache.get(cache_key)
                 if self._is_cache_entry_valid(cached_entry):
+                    cached_result_site = cached_entry.get('result_site') or cached_entry.get('site') or search_site
                     self._apply_search_result_to_row(
                         df,
                         index,
-                        search_site,
+                        cached_result_site,
                         cached_entry.get('url', ''),
                         cached_entry.get('status', '')
                     )
@@ -501,113 +662,134 @@ class AnalysisModel:
                             f"(Original: '{task['original_name_csv']}')"
                         )
 
-                        bing_url, site_query = self._get_search_url(
+                        found_url = ''
+                        result_site = task['search_site']
+                        status_text = status_not_found_liblib if task['search_site'] == 'liblib' else status_not_found_hf
+                        search_candidates = self._get_search_candidates(
                             task['name_for_decision'],
                             task['search_term_query'],
                             task['node_type']
                         )
 
-                        found_url = ''
-                        status_text = status_not_found_liblib if task['search_site'] == 'liblib' else status_not_found_hf
+                        for search_candidate in search_candidates:
+                            candidate_site = search_candidate['search_site']
+                            candidate_status = status_not_found_liblib if candidate_site == 'liblib' else status_not_found_hf
 
-                        try:
-                            page.get(bing_url, timeout=15)
-                            time.sleep(random.uniform(0.2, 0.5))
+                            try:
+                                page.get(search_candidate['bing_url'], timeout=15)
+                                time.sleep(random.uniform(0.2, 0.5))
 
-                            search_box = page.ele("#sb_form_q", timeout=5)
-                            if not search_box:
-                                status_text = status_no_search_box
-                            else:
-                                search_box.clear()
-                                search_box.input(site_query)
-                                time.sleep(random.uniform(0.1, 0.25))
-
-                                s_button = page.ele('#search_icon', timeout=3) or page.ele('xpath://button[@type="submit"]', timeout=3)
-                                if s_button:
-                                    s_button.click()
+                                search_box = page.ele("#sb_form_q", timeout=5)
+                                if not search_box:
+                                    candidate_status = status_no_search_box
                                 else:
-                                    page.run_js("document.querySelector('#sb_form').submit();")
+                                    search_box.clear()
+                                    search_box.input(search_candidate['site_query'])
+                                    time.sleep(random.uniform(0.1, 0.25))
 
-                                page.wait.load_start(timeout=10)
-                                results_container = page.ele('#b_results', timeout=10)
-
-                                if not results_container:
-                                    status_text = status_no_result_area
-                                else:
-                                    first_link = results_container.ele("xpath:.//h2/a")
-                                    if not first_link:
-                                        status_text = status_no_link
+                                    s_button = page.ele('#search_icon', timeout=3) or page.ele('xpath://button[@type="submit"]', timeout=3)
+                                    if s_button:
+                                        s_button.click()
                                     else:
-                                        candidate_url = (first_link.attr("href") or '').strip()
-                                        logger.info(f"Found: '{first_link.text}' -> {candidate_url}")
+                                        page.run_js("document.querySelector('#sb_form').submit();")
 
-                                        if task['search_site'] == 'liblib':
-                                            if candidate_url and 'liblib.art' in candidate_url:
-                                                if 'bing.com' in candidate_url or 'search' in candidate_url.lower():
-                                                    liblib_url = ''
-                                                    try:
-                                                        first_link.click()
-                                                        page.wait.load_start(timeout=10)
-                                                        current_url = (page.url or '').strip()
-                                                        if 'liblib.art' in current_url:
-                                                            liblib_url = current_url
+                                    page.wait.load_start(timeout=10)
+                                    results_container = page.ele('#b_results', timeout=10)
+
+                                    if not results_container:
+                                        candidate_status = status_no_result_area
+                                    else:
+                                        first_link = results_container.ele("xpath:.//h2/a")
+                                        if not first_link:
+                                            candidate_status = status_no_link
+                                        else:
+                                            candidate_url = (first_link.attr("href") or '').strip()
+                                            logger.info(
+                                                f"Found ({candidate_site}): '{first_link.text}' -> {candidate_url}"
+                                            )
+
+                                            if candidate_site == 'liblib':
+                                                if candidate_url and 'liblib.art' in candidate_url:
+                                                    if 'bing.com' in candidate_url or 'search' in candidate_url.lower():
+                                                        liblib_url = ''
+                                                        try:
+                                                            first_link.click()
+                                                            page.wait.load_start(timeout=10)
+                                                            current_url = (page.url or '').strip()
+                                                            if 'liblib.art' in current_url:
+                                                                liblib_url = current_url
+                                                            else:
+                                                                page.back()
+                                                                liblib_links = results_container.eles("xpath:.//a[contains(@href, 'liblib.art')]")
+                                                                for item in liblib_links:
+                                                                    direct_url = (item.attr("href") or '').strip()
+                                                                    if direct_url and 'liblib.art' in direct_url:
+                                                                        liblib_url = direct_url
+                                                                        break
+                                                        except Exception:
+                                                            logger.debug("Failed to resolve LibLib redirect URL.", exc_info=True)
+
+                                                        if liblib_url:
+                                                            found_url = liblib_url
+                                                            candidate_status = status_processed
                                                         else:
-                                                            page.back()
-                                                            liblib_links = results_container.eles("xpath:.//a[contains(@href, 'liblib.art')]")
-                                                            for item in liblib_links:
-                                                                direct_url = (item.attr("href") or '').strip()
-                                                                if direct_url and 'liblib.art' in direct_url:
-                                                                    liblib_url = direct_url
-                                                                    break
-                                                    except Exception:
-                                                        logger.debug("Failed to resolve LibLib redirect URL.", exc_info=True)
-
-                                                    if liblib_url:
-                                                        found_url = liblib_url
-                                                        status_text = status_processed
+                                                            found_url = candidate_url
+                                                            candidate_status = status_non_direct_liblib
                                                     else:
                                                         found_url = candidate_url
-                                                        status_text = status_non_direct_liblib
+                                                        candidate_status = status_processed
                                                 else:
+                                                    liblib_links = results_container.eles("xpath:.//a[contains(@href, 'liblib.art')]")
+                                                    for item in liblib_links:
+                                                        direct_url = (item.attr("href") or '').strip()
+                                                        if direct_url and 'liblib.art' in direct_url:
+                                                            found_url = direct_url
+                                                            break
+                                                    candidate_status = status_processed if found_url else status_not_found_liblib
+                                            else:
+                                                if candidate_url and 'huggingface.co' in candidate_url:
                                                     found_url = candidate_url
-                                                    status_text = status_processed
-                                            else:
-                                                liblib_links = results_container.eles("xpath:.//a[contains(@href, 'liblib.art')]")
-                                                for item in liblib_links:
-                                                    direct_url = (item.attr("href") or '').strip()
-                                                    if direct_url and 'liblib.art' in direct_url:
-                                                        found_url = direct_url
-                                                        break
-                                                status_text = status_processed if found_url else status_not_found_liblib
-                                        else:
-                                            if candidate_url and 'huggingface.co' in candidate_url:
-                                                found_url = candidate_url
-                                                status_text = status_processed
-                                            else:
-                                                status_text = status_not_found_hf
-                        except Exception:
-                            logger.error(f"Error searching for '{task['search_term_query']}'", exc_info=True)
-                            status_text = status_search_exception
-                        finally:
-                            for df_idx in task['df_indices']:
-                                self._apply_search_result_to_row(df, df_idx, task['search_site'], found_url, status_text)
-                            rows_since_save += len(task['df_indices'])
+                                                    candidate_status = status_processed
+                                                else:
+                                                    candidate_status = status_not_found_hf
+                            except Exception:
+                                logger.error(f"Error searching for '{task['search_term_query']}' via {candidate_site}", exc_info=True)
+                                candidate_status = status_search_exception
 
+                            status_text = candidate_status
+                            if found_url:
+                                result_site = candidate_site
+                                break
+
+                        for df_idx in task['df_indices']:
+                            self._apply_search_result_to_row(df, df_idx, result_site, found_url, status_text)
+                        rows_since_save += len(task['df_indices'])
+
+                        if self._should_cache_result(found_url, status_text):
                             cache[task['cache_key']] = {
                                 'site': task['search_site'],
+                                'result_site': result_site,
                                 'url': found_url,
                                 'status': status_text,
                                 'updated_at': time.time(),
                             }
                             cache_dirty = True
+                        elif task['cache_key'] in cache:
+                            cache.pop(task['cache_key'], None)
+                            cache_dirty = True
 
-                            if rows_since_save >= save_interval:
-                                df.to_csv(csv_file, index=False, encoding='utf-8-sig')
-                                rows_since_save = 0
+                        if rows_since_save >= save_interval:
+                            df.to_csv(csv_file, index=False, encoding='utf-8-sig')
+                            rows_since_save = 0
 
-                            time.sleep(random.uniform(0.15, 0.35))
+                        time.sleep(random.uniform(0.15, 0.35))
 
                     page.quit()
+                elif search_tasks:
+                    for task in search_tasks:
+                        for df_idx in task['df_indices']:
+                            self._apply_search_result_to_row(df, df_idx, task['search_site'], '', status_browser_unavailable)
+                            rows_since_save += 1
 
             df.to_csv(csv_file, index=False, encoding='utf-8-sig')
             if cache_dirty:

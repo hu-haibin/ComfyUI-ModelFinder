@@ -13,6 +13,7 @@ class SettingsModel:
     DEFAULT_SETTINGS = {
         'auto_open_html': True,
         'chrome_path': '',
+        'comfyui_path': '',
         'random_theme': True,
         'theme': 'cosmo', # Default theme
         'retention_days': 30

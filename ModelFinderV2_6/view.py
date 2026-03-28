@@ -479,12 +479,17 @@ class AppView:
             # Get initial values from controller getters
             theme = self.controller.get_loaded_theme_preference()
             chrome = self.controller.get_loaded_chrome_path()
+            comfyui = self.controller.get_loaded_comfyui_path()
             days = self.controller.get_loaded_retention_days()
-            logger.debug(f"Applying initial settings to view: Theme={theme}, Chrome='{chrome}', Days={days}")
+            logger.debug(
+                f"Applying initial settings to view: Theme={theme}, Chrome='{chrome}', "
+                f"ComfyUI='{comfyui}', Days={days}"
+            )
 
             # Apply values to view widgets
             if theme and self.theme_dropdown: self.set_selected_theme(theme)
             self.set_chrome_path(chrome) # Assuming set_chrome_path updates the var
+            self.set_comfyui_path(comfyui)
             if self.retention_days_var : self.retention_days_var.set(days) # Directly set IntVar
         else:
              logger.warning("Controller not set in view during _update_initial_settings.")

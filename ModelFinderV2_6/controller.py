@@ -46,6 +46,7 @@ class AppController:
         self.random_theme = tk.BooleanVar()
         self._loaded_theme = "cosmo"
         self._loaded_chrome_path = ""
+        self._loaded_comfyui_path = ""
         self._loaded_retention_days = 30
 
         self.status_var = tk.StringVar(value="初始化...")
@@ -74,6 +75,7 @@ class AppController:
     # --- Getters for View Initialization/Update ---
     def get_loaded_theme_preference(self): return self._loaded_theme
     def get_loaded_chrome_path(self): return self._loaded_chrome_path
+    def get_loaded_comfyui_path(self): return self._loaded_comfyui_path
     def get_loaded_retention_days(self): return self._loaded_retention_days
     # --- Core Logic Methods ---
 
@@ -477,6 +479,7 @@ class AppController:
             settings_to_save = {
                 'auto_open_html': self.auto_open_html.get(),
                 'chrome_path': self.view.get_chrome_path(),
+                'comfyui_path': self.view.get_comfyui_path(),
                 'random_theme': self.random_theme.get(),
                 
                 'theme': self.view.get_selected_theme(), # Saves the theme currently selected in the view's combobox.
@@ -512,8 +515,14 @@ class AppController:
         self.random_theme.set(loaded_settings.get('random_theme', True))
         self._loaded_theme = loaded_settings.get('theme', 'cosmo')
         self._loaded_chrome_path = loaded_settings.get('chrome_path', '')
+        self._loaded_comfyui_path = loaded_settings.get('comfyui_path', '')
         self._loaded_retention_days = loaded_settings.get('retention_days', 30)
-        logger.debug(f"Loaded settings values: AutoOpen={self.auto_open_html.get()}, RandomTheme={self.random_theme.get()}, Theme={self._loaded_theme}, Chrome='{self._loaded_chrome_path}', Days={self._loaded_retention_days}")
+        logger.debug(
+            f"Loaded settings values: AutoOpen={self.auto_open_html.get()}, "
+            f"RandomTheme={self.random_theme.get()}, Theme={self._loaded_theme}, "
+            f"Chrome='{self._loaded_chrome_path}', ComfyUI='{self._loaded_comfyui_path}', "
+            f"Days={self._loaded_retention_days}"
+        )
 
         if not self._loaded_chrome_path:
             found_chrome = find_chrome_path()
@@ -772,6 +781,7 @@ class AppController:
         dir_path = filedialog.askdirectory(title="选择ComfyUI安装目录")
         if dir_path:
             logger.info(f"已选择ComfyUI路径: {dir_path}")
+            self._loaded_comfyui_path = dir_path
             if hasattr(self.view, 'set_comfyui_path'):
                 self.view.set_comfyui_path(dir_path)
             # 选择路径后自动检查
