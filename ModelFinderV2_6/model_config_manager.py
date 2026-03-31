@@ -209,8 +209,8 @@ class ModelConfigManager:
         logger.info(f"已删除节点类型: {node_type}")
         return self._save_config()
     
-    def remove_node_model_index(self, node_type: str) -> bool:
-        """删除指定节点类型的模型索引映射。"""
+    def remove_node_model_index(self, node_type: str, index: Union[int, None] = None) -> bool:
+        """删除指定节点类型的模型索引映射或单个索引。"""
         if not node_type or not isinstance(node_type, str):
             logger.error(f"无效的节点类型: {node_type}")
             return False
@@ -219,12 +219,38 @@ class ModelConfigManager:
             logger.warning(f"节点索引映射不存在: {node_type}")
             return True
         
-        if node_type == "default":
-            logger.error("不能删除默认节点索引映射")
+        if index is None:
+            if node_type == "default":
+                logger.error("不能删除默认节点索引映射")
+                return False
+
+            del self._config['node_model_indices'][node_type]
+            logger.info(f"已删除节点索引映射: {node_type}")
+            return self._save_config()
+
+        if not isinstance(index, int):
+            logger.error(f"无效的索引值: {index}")
             return False
-        
-        del self._config['node_model_indices'][node_type]
-        logger.info(f"已删除节点索引映射: {node_type}")
+
+        indices = self._config['node_model_indices'][node_type]
+        if index not in indices:
+            logger.warning(f"节点索引映射中不存在索引: {node_type} -> {index}")
+            return True
+
+        if node_type == "default" and len(indices) == 1:
+            logger.error("不能删除默认节点索引映射的最后一个索引")
+            return False
+
+        updated_indices = list(indices)
+        updated_indices.remove(index)
+
+        if updated_indices:
+            self._config['node_model_indices'][node_type] = updated_indices
+            logger.info(f"已删除节点索引映射中的索引: {node_type} -> {index}")
+        else:
+            del self._config['node_model_indices'][node_type]
+            logger.info(f"已删除空的节点索引映射: {node_type}")
+
         return self._save_config()
     
     def remove_model_extension(self, extension: str) -> bool:

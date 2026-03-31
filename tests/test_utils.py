@@ -4,6 +4,7 @@ import re
 import time
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from ModelFinderV2_6.analysis_model import AnalysisModel
@@ -91,3 +92,60 @@ def test_search_candidates_include_fallback_site_and_stem_variant() -> None:
     assert candidates[0]["search_site"] == "hf"
     assert any(candidate["search_site"] == "liblib" for candidate in candidates)
     assert any('site:huggingface.co "demo"' == candidate["site_query"] for candidate in candidates)
+
+
+def test_analysis_model_uses_injected_name_corrector() -> None:
+    analysis = AnalysisModel(name_corrector=lambda name: "sd_xl_base_1.0.safetensors" if name == "SDXL_v1.0" else name)
+
+    assert analysis.remove_chinese_prefix("SDXL_v1.0") == "sd_xl_base_1.0.safetensors"
+
+
+def test_analysis_model_reads_chrome_path_from_provider() -> None:
+    analysis = AnalysisModel(chrome_path_provider=lambda: " C:/PortableChrome/chrome.exe ")
+
+    assert analysis._get_active_chrome_path() == "C:/PortableChrome/chrome.exe"
+
+
+def test_analysis_model_uses_injected_comfyui_path_provider(tmp_path: Path) -> None:
+    comfyui_root = tmp_path / "ComfyUI"
+    models_dir = comfyui_root / "models" / "checkpoints"
+    models_dir.mkdir(parents=True)
+    (models_dir / "demo.safetensors").write_text("x", encoding="utf-8")
+
+    workflow_path = tmp_path / "workflow.json"
+    workflow_path.write_text(
+        json.dumps(
+            {
+                "nodes": [
+                    {
+                        "id": 1,
+                        "type": "CheckpointLoaderSimple",
+                        "widgets_values": ["demo.safetensors"],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    analysis = AnalysisModel(comfyui_path_provider=lambda: str(comfyui_root))
+
+    assert analysis.find_missing_models(str(workflow_path)) == []
+
+
+def test_apply_search_result_to_row_normalizes_hf_blob_links() -> None:
+    analysis = AnalysisModel()
+    df = pd.DataFrame([{"状态": "", "下载链接": "", "镜像链接": "", "搜索链接": ""}])
+
+    analysis._apply_search_result_to_row(
+        df,
+        0,
+        "hf",
+        "https://huggingface.co/foo/bar/blob/main/model.safetensors",
+        "",
+    )
+
+    assert df.loc[0, "下载链接"] == "https://huggingface.co/foo/bar/resolve/main/model.safetensors"
+    assert df.loc[0, "镜像链接"] == "https://hf-mirror.com/foo/bar/resolve/main/model.safetensors"
+    assert df.loc[0, "状态"] == "已处理"

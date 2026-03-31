@@ -1,13 +1,11 @@
-# model_finder/controller.py
+﻿# model_finder/controller.py
 import os
-import sys
 import json
 import random
 import threading
 import webbrowser
 import traceback
 import glob
-import subprocess
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import ttkbootstrap as ttk
@@ -21,7 +19,11 @@ from .view import AppView
 from .utils import check_dependencies, find_chrome_path, get_mirror_link, create_html_view
 from .analysis_model import AnalysisModel
 from .file_manager import cleanup_old_results, get_output_path, get_results_folder
+from .irregular_mapping_service import IrregularMappingService
+from .model_config_service import ModelConfigService
 from .plugin_repair import PluginRepairModel  # 导入插件修复模型
+from .plugin_repair_service import PluginRepairService
+from .workflow_processing_service import WorkflowProcessingService
 from . import __version__, __author__
 
 logger = logging.getLogger(__name__) # Get logger for this module
@@ -34,10 +36,17 @@ class AppController:
         self.__author__ = author
         self.settings_model = SettingsModel()
         self.irregular_names_model = IrregularNamesModel()
-        # 初始化analysis_model时传递controller自身作为参数
-        self.analysis_model = AnalysisModel(controller=self)
-        # 初始化plugin_repair_model
+        self.analysis_model = AnalysisModel(
+            controller=self,
+            name_corrector=self.irregular_names_model.get_corrected_name,
+            comfyui_path_provider=self.get_active_comfyui_path,
+            chrome_path_provider=self.get_loaded_chrome_path,
+        )
         self.plugin_repair_model = PluginRepairModel()
+        self.irregular_mapping_service = IrregularMappingService(self.irregular_names_model)
+        self.model_config_service = ModelConfigService(self.analysis_model.config_manager)
+        self.workflow_processing_service = WorkflowProcessingService(self.analysis_model)
+        self.plugin_repair_service = PluginRepairService(self.plugin_repair_model)
 
         self.html_file_path = None
         self.batch_summary_file_path = None
@@ -77,6 +86,11 @@ class AppController:
     def get_loaded_chrome_path(self): return self._loaded_chrome_path
     def get_loaded_comfyui_path(self): return self._loaded_comfyui_path
     def get_loaded_retention_days(self): return self._loaded_retention_days
+
+    def get_active_comfyui_path(self):
+        comfyui_path = self.view.get_comfyui_path().strip() if self.view else ""
+        return comfyui_path or self._loaded_comfyui_path
+
     # --- Core Logic Methods ---
 
     def show_welcome_message(self):
@@ -161,32 +175,28 @@ class AppController:
     def _analyze_workflow_thread(self, workflow_file):
         logger.info(f"Analysis thread started for: {workflow_file}")
         try:
-            missing_files = self.analysis_model.find_missing_models(workflow_file)
+            analysis_result = self.workflow_processing_service.analyze_workflow(workflow_file)
 
-            if not missing_files:
-                 self.root.after(0, logger.info, "分析完成: 没有发现缺失文件。")
-                 self.root.after(0, self.view.update_log, "分析完成: 没有发现缺失文件。") # User message
-                 self.root.after(0, self.update_status, "分析完成: 没有缺失文件")
-                 self.root.after(0, self.view.show_info, "完成", "没有发现缺失文件")
-                 return
+            if analysis_result.status == "no_missing":
+                self.root.after(0, logger.info, "分析完成: 没有发现缺失文件。")
+                self.root.after(0, self.view.update_log, "分析完成: 没有发现缺失文件。")
+                self.root.after(0, self.update_status, "分析完成: 没有缺失文件")
+                self.root.after(0, self.view.show_info, "完成", "没有发现缺失文件")
+                return
 
-            self.root.after(0, logger.info, f"发现 {len(missing_files)} 个缺失文件。正在创建CSV...")
-            self.root.after(0, self.view.update_log, f"发现 {len(missing_files)} 个缺失文件。正在创建CSV...") # User message
-            output_basename = os.path.basename(workflow_file)
-            csv_file = self.analysis_model.create_csv_file(missing_files, output_basename)
+            if analysis_result.status == "csv_failed":
+                self.root.after(0, logger.error, "创建CSV文件失败。")
+                self.root.after(0, self.view.update_log, "创建CSV文件失败。")
+                self.root.after(0, self.update_status, "分析完成，但创建CSV失败")
+                self.root.after(0, self.view.show_error, "错误", "创建CSV文件失败")
+                return
 
-            if not csv_file:
-                 self.root.after(0, logger.error, "创建CSV文件失败。")
-                 self.root.after(0, self.view.update_log, "创建CSV文件失败。") # User message
-                 self.root.after(0, self.update_status, "分析完成，但创建CSV失败")
-                 self.root.after(0, self.view.show_error, "错误", "创建CSV文件失败")
-                 return
-
+            csv_file = analysis_result.csv_file
+            self.root.after(0, logger.info, f"发现 {analysis_result.missing_count} 个缺失文件。正在创建CSV...")
+            self.root.after(0, self.view.update_log, f"发现 {analysis_result.missing_count} 个缺失文件。正在创建CSV...")
             self.root.after(0, logger.info, f"CSV文件已创建: {csv_file}")
-            self.root.after(0, self.view.update_log, f"CSV文件已创建: {os.path.basename(csv_file)}") # User message (short path)
+            self.root.after(0, self.view.update_log, f"CSV文件已创建: {os.path.basename(csv_file)}")
             self.root.after(0, self.update_status, "分析完成，准备搜索链接...")
-
-            # Start search
             self.root.after(0, self.search_links, csv_file)
 
         except Exception as e:
@@ -217,12 +227,15 @@ class AppController:
             html_result = None
             try:
                 self.root.after(0, self.view.update_log, f"开始搜索模型链接: {os.path.basename(csv_file)}") # User message
-                html_result = self.analysis_model.search_model_links(csv_file, progress_callback=update_progress_callback)
+                search_result = self.workflow_processing_service.search_links(
+                    csv_file,
+                    progress_callback=update_progress_callback,
+                )
 
-                if isinstance(html_result, str) and os.path.exists(html_result):
-                    self.html_file_path = html_result
-                    logger.info(f"搜索成功！HTML结果: {html_result}")
-                    self.root.after(0, self.view.update_log, f"搜索完成！HTML结果: {os.path.basename(html_result)}") # User message
+                if search_result.status == "html_ready" and search_result.html_file:
+                    self.html_file_path = search_result.html_file
+                    logger.info(f"搜索成功！HTML结果: {search_result.html_file}")
+                    self.root.after(0, self.view.update_log, f"搜索完成！HTML结果: {os.path.basename(search_result.html_file)}")
                     self.root.after(0, self.update_status, "搜索完成")
                     self.root.after(0, self.view.set_progress, 100, "100%")
                     self.root.after(0, self.view.enable_view_result_button, True)
@@ -234,12 +247,11 @@ class AppController:
 
                     self.root.after(0, self.view.show_info, "完成", "搜索完成，可以查看HTML结果")
 
-                elif html_result == True:
-                     logger.info("搜索完成: 无需搜索，模型已处理或存在。")
-                     self.root.after(0, self.view.update_log,"无需搜索，所有模型均已处理或存在。") # User message
-                     self.root.after(0, self.update_status,"无需搜索")
-                     self.root.after(0, self.view.set_progress, 100, "100%")
-
+                elif search_result.status == "nothing_to_search":
+                    logger.info("搜索完成: 无需搜索，模型已处理或存在。")
+                    self.root.after(0, self.view.update_log,"无需搜索，所有模型均已处理或存在。")
+                    self.root.after(0, self.update_status,"无需搜索")
+                    self.root.after(0, self.view.set_progress, 100, "100%")
                 else:
                     logger.warning(f"搜索完成，但未能生成HTML结果 for {csv_file}")
                     self.root.after(0, self.view.update_log,"搜索完成，但未能生成HTML结果。") # User message
@@ -317,96 +329,76 @@ class AppController:
             update_batch_progress = lambda current, total: \
                  self.root.after(0, self.view.set_batch_progress, int((current / total) * 100), f"{int((current / total) * 100)}%") if total > 0 else None
 
-            processed_summary_csv = None
-            all_missing_summary_csv = None
-
             try:
                 self.root.after(0, self.view.update_log, f"开始批量处理目录: {directory}") # User message
-                processed_summary_csv = self.analysis_model.batch_process_workflows(directory, file_pattern, progress_callback=update_batch_progress)
+                batch_result = self.workflow_processing_service.batch_process(
+                    directory,
+                    file_pattern,
+                    progress_callback=update_batch_progress,
+                )
 
-                # Find the "汇总缺失文件.csv"
-                try:
-                     output_dir = get_results_folder()
-                     if output_dir and os.path.isdir(output_dir):
-                         date_folders = sorted([d for d in os.listdir(output_dir) if os.path.isdir(os.path.join(output_dir, d))], reverse=True)
-                         if date_folders:
-                              latest_date_dir = os.path.join(output_dir, date_folders[0])
-                              potential_summary = os.path.join(latest_date_dir, "汇总缺失文件.csv")
-                              if os.path.exists(potential_summary):
-                                  all_missing_summary_csv = potential_summary
-                                  self.batch_summary_file_path = all_missing_summary_csv
-                                  self.root.after(0, logger.info, f"找到汇总缺失文件: {all_missing_summary_csv}")
-                                  self.root.after(0, self.view.update_log, f"找到汇总缺失文件: {os.path.basename(all_missing_summary_csv)}") # User message
-                              else: logger.warning(f"汇总缺失文件.csv not found in {latest_date_dir}")
-                         else: logger.warning(f"No date folders found in results directory: {output_dir}")
-                     else: logger.warning(f"Results directory not valid: {output_dir}")
-                except Exception as e:
-                     logger.error("查找汇总缺失文件时出错", exc_info=True)
-                     self.root.after(0, self.view.update_log, "查找汇总缺失文件时出错，请查看日志。") # User message
+                if batch_result.all_missing_summary_csv:
+                    self.batch_summary_file_path = batch_result.all_missing_summary_csv
+                    self.root.after(0, logger.info, f"找到汇总缺失文件: {batch_result.all_missing_summary_csv}")
+                    self.root.after(0, self.view.update_log, f"找到汇总缺失文件: {os.path.basename(batch_result.all_missing_summary_csv)}")
 
-                # --- Process results ---
-                if processed_summary_csv == True:
-                     logger.info("Batch process complete: No missing files found.")
-                     self.root.after(0, self.view.update_log,"批量处理完成，所有工作流均未发现缺失文件。") # User message
-                     self.root.after(0, self.update_status,"批量处理完成: 无缺失")
-                     self.root.after(0, self.view.set_batch_progress, 100, "100%")
-                     self.root.after(0, self.view.show_info, "完成", "批量处理完成，未发现缺失文件。")
+                if batch_result.status == "no_missing":
+                    logger.info("Batch process complete: No missing files found.")
+                    self.root.after(0, self.view.update_log,"批量处理完成，所有工作流均未发现缺失文件。")
+                    self.root.after(0, self.update_status,"批量处理完成: 无缺失")
+                    self.root.after(0, self.view.set_batch_progress, 100, "100%")
+                    self.root.after(0, self.view.show_info, "完成", "批量处理完成，未发现缺失文件。")
 
-                elif isinstance(processed_summary_csv, str) and os.path.exists(processed_summary_csv):
+                elif batch_result.status == "summary_ready" and batch_result.processed_summary_csv:
+                    processed_summary_csv = batch_result.processed_summary_csv
                     logger.info(f"批量处理完成，结果摘要: {processed_summary_csv}")
-                    self.root.after(0, self.view.update_log,f"批量处理完成，结果摘要: {os.path.basename(processed_summary_csv)}") # User message
+                    self.root.after(0, self.view.update_log,f"批量处理完成，结果摘要: {os.path.basename(processed_summary_csv)}")
                     self.root.after(0, self.update_status,"批量处理完成，准备搜索...")
                     self.root.after(0, self.view.set_batch_progress, 100, "100%")
 
-                    # Update Treeview
-                    try:
-                        import pandas as pd # Local import might be slightly cleaner for threads
-                        df_summary = pd.read_csv(processed_summary_csv, encoding='utf-8-sig')
-                        self.root.after(0, self.view.clear_batch_results)
-                        for _, row in df_summary.iterrows():
-                             self.root.after(0, self.view.add_batch_result,
-                                             row.get('工作流文件', ''), row.get('缺失数量', '0'), "已分析")
-                    except Exception as e:
-                         logger.error(f"读取批量结果CSV时出错: {processed_summary_csv}", exc_info=True)
-                         self.root.after(0, self.view.update_log, f"读取批量结果CSV时出错: {os.path.basename(processed_summary_csv)}") # User message
+                    self.root.after(0, self.view.clear_batch_results)
+                    for workflow_name, missing_count in batch_result.batch_rows:
+                        self.root.after(0, self.view.add_batch_result, workflow_name, missing_count, "已分析")
 
-                    # --- Search based on summary ---
-                    if all_missing_summary_csv:
-                         self.root.after(0, self.update_status,"开始搜索汇总链接...")
-                         self.root.after(0, self.view.set_batch_progress, 0, "0%") # Reset for search
+                    if batch_result.all_missing_summary_csv:
+                        self.root.after(0, self.update_status,"开始搜索汇总链接...")
+                        self.root.after(0, self.view.set_batch_progress, 0, "0%")
 
-                         update_search_progress = lambda current, total: \
-                              self.root.after(0, self.view.set_batch_progress, int((current / total) * 100), f"{int((current / total) * 100)}%") if total > 0 else None
+                        update_search_progress = lambda current, total: \
+                            self.root.after(0, self.view.set_batch_progress, int((current / total) * 100), f"{int((current / total) * 100)}%") if total > 0 else None
 
-                         logger.info(f"Starting summary search for: {all_missing_summary_csv}")
-                         html_result = self.analysis_model.search_model_links(all_missing_summary_csv, progress_callback=update_search_progress)
+                        logger.info(f"Starting summary search for: {batch_result.all_missing_summary_csv}")
+                        search_result = self.workflow_processing_service.search_links(
+                            batch_result.all_missing_summary_csv,
+                            progress_callback=update_search_progress,
+                        )
 
-                         if isinstance(html_result, str) and os.path.exists(html_result):
-                              self.batch_summary_file_path = html_result # Store HTML path
-                              logger.info(f"汇总搜索成功！HTML结果: {html_result}")
-                              self.root.after(0, self.view.update_log,f"汇总搜索完成！HTML结果: {os.path.basename(html_result)}") # User message
-                              self.root.after(0, self.update_status,"批量搜索完成")
-                              self.root.after(0, self.view.set_batch_progress, 100, "100%")
-                              if self.auto_open_html.get():
-                                   self.root.after(0, logger.info,"自动打开HTML结果...")
-                                   self.root.after(0, self.view.update_log,"自动打开HTML结果...") # User message
-                                   self.root.after(100, lambda: webbrowser.open(f"file:///{html_result}"))
-                              self.root.after(0, self.view.show_info, "完成", "批量处理和搜索完成")
-                         else:
-                              logger.warning(f"汇总搜索完成，但未能生成HTML结果 for {all_missing_summary_csv}")
-                              self.root.after(0, self.view.update_log,"汇总搜索完成，但未能生成HTML结果。") # User message
-                              self.root.after(0, self.update_status,"汇总搜索未生成HTML")
-                              self.root.after(0, self.view.show_info, "完成", "批量搜索完成，但未生成HTML。")
+                        if search_result.status == "html_ready" and search_result.html_file:
+                            self.batch_summary_file_path = search_result.html_file
+                            logger.info(f"汇总搜索成功！HTML结果: {search_result.html_file}")
+                            self.root.after(0, self.view.update_log,f"汇总搜索完成！HTML结果: {os.path.basename(search_result.html_file)}")
+                            self.root.after(0, self.update_status,"批量搜索完成")
+                            self.root.after(0, self.view.set_batch_progress, 100, "100%")
+                            if self.auto_open_html.get():
+                                self.root.after(0, logger.info,"自动打开HTML结果...")
+                                self.root.after(0, self.view.update_log,"自动打开HTML结果...")
+                                self.root.after(100, lambda: webbrowser.open(f"file:///{search_result.html_file}"))
+                            self.root.after(0, self.view.show_info, "完成", "批量处理和搜索完成")
+                        else:
+                            logger.warning(f"汇总搜索完成，但未能生成HTML结果 for {batch_result.all_missing_summary_csv}")
+                            self.root.after(0, self.view.update_log,"汇总搜索完成，但未能生成HTML结果。")
+                            self.root.after(0, self.update_status,"汇总搜索未生成HTML")
+                            self.root.after(0, self.view.show_info, "完成", "批量搜索完成，但未生成HTML。")
                     else:
-                         logger.warning("未找到'汇总缺失文件.csv'，无法执行搜索。")
-                         self.root.after(0, self.view.update_log,"未找到'汇总缺失文件.csv'，无法执行搜索。") # User message
-                         self.root.after(0, self.update_status,"批量处理完成，未找到汇总文件")
-                         self.root.after(0, self.view.show_warning, "警告", "未找到汇总缺失文件，无法进行链接搜索。")
+                        logger.warning("未找到'汇总缺失文件.csv'，无法执行搜索。")
+                        self.root.after(0, self.view.update_log,"未找到'汇总缺失文件.csv'，无法执行搜索。")
+                        self.root.after(0, self.update_status,"批量处理完成，未找到汇总文件")
+                        self.root.after(0, self.view.show_warning, "警告", "未找到汇总缺失文件，无法进行链接搜索。")
                 else:
-                     logger.error(f"批量处理失败或未生成预期的结果文件. Result: {processed_summary_csv}")
-                     self.root.after(0, self.view.update_log,"批量处理失败或未生成预期的结果文件。") # User message
-                     self.root.after(0, self.update_status,"批量处理失败")
-                     self.root.after(0, self.view.show_error, "错误", "批量处理失败。")
+                    logger.error(f"批量处理失败或未生成预期的结果文件. Result: {batch_result.status}")
+                    self.root.after(0, self.view.update_log,"批量处理失败或未生成预期的结果文件。")
+                    self.root.after(0, self.update_status,"批量处理失败")
+                    self.root.after(0, self.view.show_error, "错误", "批量处理失败。")
 
             except Exception as e:
                  logger.error(f"批量处理线程执行过程中发生严重错误: {directory}", exc_info=True)
@@ -592,144 +584,116 @@ class AppController:
             self.view.update_log("无法打开结果文件夹，请查看日志文件。") # User message
     # 示例：添加一个新映射的处理方法
     def handle_add_irregular_mapping(self, original_name, corrected_name, notes):
-        if self.irregular_names_model.add_mapping(original_name, corrected_name, notes):
-            self.view.update_log("成功添加不规则名称映射。")
-            self.refresh_irregular_mappings_view() # 一个新的方法，用于更新GUI中的列表
+        result = self.irregular_mapping_service.add_mapping(original_name, corrected_name, notes)
+        if result.success:
+            self.view.update_log(result.message)
+            self.refresh_irregular_mappings_view()
         else:
-            self.view.show_error("添加失败", "无法添加不规则名称映射，请检查输入或日志。")
+            self.view.show_error("添加失败", result.message)
 
     # 处理更新不规则名称映射的方法
     def handle_update_irregular_mapping(self, mapping_id, original_name, corrected_name, notes):
         logger.info(f"更新不规则名称映射: ID={mapping_id}, 原始名={original_name}, 修正名={corrected_name}")
-        if self.irregular_names_model.update_mapping(mapping_id, original_name, corrected_name, notes):
-            self.view.update_log("成功更新不规则名称映射。")
+        result = self.irregular_mapping_service.update_mapping(mapping_id, original_name, corrected_name, notes)
+        if result.success:
+            self.view.update_log(result.message)
             self.refresh_irregular_mappings_view()
         else:
-            self.view.show_error("更新失败", "无法更新不规则名称映射，请检查输入或日志。")
+            self.view.show_error("更新失败", result.message)
 
     # 处理删除不规则名称映射的方法
     def handle_delete_irregular_mapping(self, mapping_id):
         logger.info(f"删除不规则名称映射: ID={mapping_id}")
-        if self.irregular_names_model.delete_mapping(mapping_id):
-            self.view.update_log("成功删除不规则名称映射。")
+        result = self.irregular_mapping_service.delete_mapping(mapping_id)
+        if result.success:
+            self.view.update_log(result.message)
             self.refresh_irregular_mappings_view()
         else:
-            self.view.show_error("删除失败", "无法删除不规则名称映射，请检查输入或日志。")
+            self.view.show_error("删除失败", result.message)
 
     # 示例：刷新GUI中映射列表的方法
     def refresh_irregular_mappings_view(self):
-        # 获取并显示所有不规则映射
-        mappings = self.irregular_names_model.get_all_mappings()
+        mappings = self.irregular_mapping_service.list_mappings()
         self.view.load_irregular_mappings(mappings)
         
     # --- 模型配置管理相关方法 ---
     def refresh_model_config_view(self):
         """获取并显示所有模型配置数据"""
-        node_types = self.analysis_model.config_manager.get_model_node_types()
-        node_indices = self.analysis_model.config_manager.get_node_model_indices()
-        extensions = self.analysis_model.config_manager.get_model_extensions()
+        snapshot = self.model_config_service.get_snapshot()
         
-        self.view.load_model_node_types(node_types)
-        self.view.load_node_indices(node_indices)
-        self.view.load_model_extensions(extensions)
-        logger.info(f"已刷新模型配置视图：{len(node_types)}个节点类型, {len(node_indices)}个索引映射, {len(extensions)}个扩展名")
+        self.view.load_model_node_types(snapshot.node_types)
+        self.view.load_node_indices(snapshot.node_indices)
+        self.view.load_model_extensions(snapshot.extensions)
+        logger.info(
+            f"已刷新模型配置视图：{len(snapshot.node_types)}个节点类型, "
+            f"{len(snapshot.node_indices)}个索引映射, {len(snapshot.extensions)}个扩展名"
+        )
     
     def handle_add_model_node_type(self, node_type):
         """添加模型节点类型"""
-        if not node_type.strip():
-            self.view.show_warning("警告", "节点类型不能为空")
-            return False
-            
-        success = self.analysis_model.config_manager.add_model_node_type(node_type)
-        if success:
+        result = self.model_config_service.add_model_node_type(node_type)
+        if result.success:
             self.refresh_model_config_view()
-            self.view.show_info("成功", f"已添加节点类型: {node_type}")
+            self.view.show_info("成功", result.message)
             return True
-        else:
-            self.view.show_warning("警告", f"节点类型 '{node_type}' 已存在")
-            return False
+        self.view.show_warning("警告", result.message)
+        return False
     
     def handle_delete_model_node_type(self, node_type):
         """删除模型节点类型"""
-        success = self.analysis_model.config_manager.remove_model_node_type(node_type)
-        if success:
+        result = self.model_config_service.delete_model_node_type(node_type)
+        if result.success:
             self.refresh_model_config_view()
-            self.view.show_info("成功", f"已删除节点类型: {node_type}")
+            self.view.show_info("成功", result.message)
             return True
-        else:
-            self.view.show_warning("警告", f"删除节点类型失败: {node_type}")
-            return False
+        self.view.show_warning("警告", result.message)
+        return False
     
     def handle_add_node_model_index(self, node_type, index):
         """添加节点模型索引映射"""
-        try:
-            index = int(index)
-            # 将单个索引值转换为列表，然后传递给config_manager
-            indices = [index]
-            success = self.analysis_model.config_manager.add_node_model_index(node_type, indices)
-            if success:
-                self.refresh_model_config_view()
-                self.view.show_info("成功", f"已添加节点索引映射: {node_type} -> {index}")
-                return True
-            else:
-                self.view.show_warning("警告", f"添加节点索引映射失败: {node_type} -> {index}")
-                return False
-        except ValueError:
-            self.view.show_error("错误", "索引必须是整数")
+        result = self.model_config_service.add_node_model_index(node_type, index)
+        if result.success:
+            self.refresh_model_config_view()
+            self.view.show_info("成功", result.message)
+            return True
+        if result.message == "索引必须是整数":
+            self.view.show_error("错误", result.message)
             return False
+        self.view.show_warning("警告", result.message)
+        return False
     
     def handle_delete_node_model_index(self, node_type, index=None):
         """删除节点模型索引映射(整个节点类型或特定索引)"""
-        try:
-            if index is not None:
-                index = int(index)
-                success = self.analysis_model.config_manager.remove_node_model_index(node_type, index)
-            else:
-                success = self.analysis_model.config_manager.remove_node_model_index_type(node_type)
-            
-            if success:
-                self.refresh_model_config_view()
-                msg = f"已删除节点索引映射: {node_type}"
-                if index is not None:
-                    msg += f" -> {index}"
-                self.view.show_info("成功", msg)
-                return True
-            else:
-                self.view.show_warning("警告", f"删除节点索引映射失败")
-                return False
-        except ValueError:
-            self.view.show_error("错误", "索引必须是整数")
+        result = self.model_config_service.delete_node_model_index(node_type, index)
+        if result.success:
+            self.refresh_model_config_view()
+            self.view.show_info("成功", result.message)
+            return True
+        if result.message == "索引必须是整数":
+            self.view.show_error("错误", result.message)
             return False
+        self.view.show_warning("警告", result.message)
+        return False
     
     def handle_add_model_extension(self, extension):
         """添加模型文件扩展名"""
-        if not extension.strip():
-            self.view.show_warning("警告", "扩展名不能为空")
-            return False
-            
-        # 确保扩展名格式正确
-        if not extension.startswith('.'):
-            extension = '.' + extension
-            
-        success = self.analysis_model.config_manager.add_model_extension(extension)
-        if success:
+        result = self.model_config_service.add_model_extension(extension)
+        if result.success:
             self.refresh_model_config_view()
-            self.view.show_info("成功", f"已添加模型扩展名: {extension}")
+            self.view.show_info("成功", result.message)
             return True
-        else:
-            self.view.show_warning("警告", f"模型扩展名 '{extension}' 已存在")
-            return False
+        self.view.show_warning("警告", result.message)
+        return False
     
     def handle_delete_model_extension(self, extension):
         """删除模型文件扩展名"""
-        success = self.analysis_model.config_manager.remove_model_extension(extension)
-        if success:
+        result = self.model_config_service.delete_model_extension(extension)
+        if result.success:
             self.refresh_model_config_view()
-            self.view.show_info("成功", f"已删除模型扩展名: {extension}")
+            self.view.show_info("成功", result.message)
             return True
-        else:
-            self.view.show_warning("警告", f"删除模型扩展名失败: {extension}")
-            return False
+        self.view.show_warning("警告", result.message)
+        return False
 
     def handle_scan_downloads_folder(self, folder_path=None):
         """扫描下载文件夹中的模型文件"""
@@ -764,11 +728,7 @@ class AppController:
         """刷新插件修复标签页的数据"""
         logger.debug("刷新插件修复标签页数据")
         try:
-            plugins = self.plugin_repair_model.get_all_plugins()
-            plugins_data = [{"name": plugin.name, 
-                            "description": plugin.description,
-                            "status": "未检测"} 
-                           for plugin in plugins]
+            plugins_data = self.plugin_repair_service.get_plugins_for_view()
             if hasattr(self.view, 'display_repair_plugins'):
                 self.view.display_repair_plugins(plugins_data)
             logger.info(f"已加载 {len(plugins_data)} 个支持修复的插件")
@@ -805,34 +765,19 @@ class AppController:
                 return
         
         try:
-            # 获取需要修复的插件
-            need_repair = self.plugin_repair_model.check_plugin_status(comfyui_path)
+            result = self.plugin_repair_service.check_plugin_status(comfyui_path)
+            for plugin_status in result.data["plugin_statuses"]:
+                self.view.update_plugin_status(plugin_status["name"], plugin_status["status"])
             
-            # 更新UI中的插件状态
-            plugins = self.plugin_repair_model.get_all_plugins()
-            for plugin in plugins:
-                if plugin.name in need_repair:
-                    self.view.update_plugin_status(plugin.name, "需要修复")
-                else:
-                    self.view.update_plugin_status(plugin.name, "已安装正确")
-            
-            if not need_repair:
-                self.view.show_info("检查结果", "所有支持的插件都已正确安装。")
+            if result.message:
+                self.view.show_info("检查结果", result.message)
         except Exception as e:
             logger.error(f"检查插件状态时出错: {e}", exc_info=True)
             self.view.show_error("错误", f"检查插件状态时出错: {e}")
     
     def _validate_comfyui_dir(self, dir_path):
         """验证目录是否为ComfyUI安装目录"""
-        # 检查一些ComfyUI典型的文件/目录是否存在
-        expected_items = ["main.py", "web", "comfy", "models"]
-        found_count = 0
-        for item in expected_items:
-            if os.path.exists(os.path.join(dir_path, item)):
-                found_count += 1
-        
-        # 如果找到一半以上的预期项，就认为是ComfyUI目录
-        return found_count >= len(expected_items) // 2
+        return self.plugin_repair_service.validate_comfyui_dir(dir_path)
     
     def repair_selected_plugin(self):
         """修复选中的插件"""
@@ -858,25 +803,16 @@ class AppController:
         self.view.set_repair_status("启动修复助手...", 0)
         
         try:
-            # 直接运行download_helper_joy_caption_two.py脚本
-            script_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
-                                     "download_helper_joy_caption_two.py")
-            
-            # 在新进程中运行脚本
-            if sys.platform.startswith('win'):
-                # Windows下使用subprocess.Popen打开新窗口
-                subprocess.Popen([sys.executable, script_path], 
-                               creationflags=subprocess.CREATE_NEW_CONSOLE)
+            result = self.plugin_repair_service.launch_repair_helper()
+            if result.success:
+                logger.info(f"已启动插件修复助手: {result.data['script_path']}")
+                self.view.set_repair_status(result.message, 100)
             else:
-                # Linux/Mac下直接运行脚本
-                subprocess.Popen([sys.executable, script_path])
-                
-            logger.info(f"已启动插件修复助手: {script_path}")
-            self.view.set_repair_status("已启动修复助手，请在新窗口中操作", 100)
-            
+                self.view.show_error("错误", result.message)
         except Exception as e:
             logger.error(f"启动插件修复助手时发生异常: {e}", exc_info=True)
             self.view.show_error("错误", f"启动修复助手时发生异常: {e}")
         finally:
             # 延迟一秒后重新启用修复按钮
             self.root.after(1000, lambda: self.view.repair_button.config(state=tk.NORMAL))
+
