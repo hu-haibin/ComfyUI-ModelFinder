@@ -16,7 +16,7 @@ class _DummyIrregularNamesModel:
         self.add_result = add_result
         self.update_result = update_result
         self.delete_result = delete_result
-        self.mappings = [{"id": 1, "original_name": "foo", "corrected_name": "bar", "notes": ""}]
+        self.mappings = [{"id": "1", "original_name": "foo", "corrected_name": "bar", "notes": ""}]
         self.calls = []
 
     def get_all_mappings(self):
@@ -90,34 +90,42 @@ class _DummyPluginRepairModel:
         return list(self.need_repair)
 
 
-def test_irregular_mapping_service_delegates_crud_calls() -> None:
+def test_irregular_mapping_service_returns_operation_results() -> None:
     model = _DummyIrregularNamesModel()
     service = IrregularMappingService(model)
 
-    assert service.list_mappings() == model.mappings
-    assert service.add_mapping("foo", "bar", "note").success
-    assert service.update_mapping(1, "foo", "baz", "").success
-    assert service.delete_mapping(1).success
+    result = service.list_mappings()
+
+    assert result.success
+    assert result.code == "mappings_loaded"
+    assert result.data == model.mappings
+    assert service.add_mapping("foo", "bar", "note").code == "mapping_added"
+    assert service.update_mapping("1", "foo", "baz", "").code == "mapping_updated"
+    assert service.delete_mapping("1").code == "mapping_deleted"
     assert model.calls == [
         ("add", "foo", "bar", "note"),
-        ("update", 1, "foo", "baz", ""),
-        ("delete", 1),
+        ("update", "1", "foo", "baz", ""),
+        ("delete", "1"),
     ]
 
 
-def test_model_config_service_normalizes_inputs_before_delegating() -> None:
+def test_model_config_service_wraps_snapshot_and_normalizes_inputs() -> None:
     manager = _DummyConfigManager()
     service = ModelConfigService(manager)
 
-    snapshot = service.get_snapshot()
+    snapshot_result = service.get_snapshot()
+    snapshot = snapshot_result.data
+
+    assert snapshot_result.success
+    assert snapshot_result.code == "snapshot_loaded"
     assert snapshot.node_types == ["CheckpointLoaderSimple"]
     assert snapshot.node_indices["CheckpointLoaderSimple"] == [0, 1]
     assert snapshot.extensions == [".safetensors"]
 
-    assert service.add_model_node_type("  Sampler  ").success
-    assert service.add_node_model_index("Sampler", "3").success
-    assert service.add_model_extension("ckpt").success
-    assert service.delete_node_model_index("Sampler", "3").success
+    assert service.add_model_node_type("  Sampler  ").code == "node_type_added"
+    assert service.add_node_model_index("Sampler", "3").code == "node_index_added"
+    assert service.add_model_extension("ckpt").code == "extension_added"
+    assert service.delete_node_model_index("Sampler", "3").code == "node_index_deleted"
 
     assert manager.calls == [
         ("add_model_node_type", "Sampler"),
@@ -133,10 +141,10 @@ def test_model_config_service_rejects_non_integer_index() -> None:
     result = service.add_node_model_index("Sampler", "abc")
 
     assert not result.success
-    assert "整数" in result.message
+    assert result.code == "invalid_index"
 
 
-def test_plugin_repair_service_returns_view_models_and_status_mapping() -> None:
+def test_plugin_repair_service_returns_operation_results_for_view_and_validation() -> None:
     plugins = [
         SimpleNamespace(name="Joy Caption Two", description="desc-a"),
         SimpleNamespace(name="Other Plugin", description="desc-b"),
@@ -144,17 +152,22 @@ def test_plugin_repair_service_returns_view_models_and_status_mapping() -> None:
     model = _DummyPluginRepairModel(plugins=plugins, need_repair=["Joy Caption Two"])
     service = PluginRepairService(model)
 
-    assert service.get_plugins_for_view() == [
+    view_result = service.get_plugins_for_view()
+
+    assert view_result.success
+    assert view_result.code == "plugins_loaded"
+    assert view_result.data == [
         {"name": "Joy Caption Two", "description": "desc-a", "status": "未检查"},
         {"name": "Other Plugin", "description": "desc-b", "status": "未检查"},
     ]
 
-    result = service.check_plugin_status("C:/ComfyUI")
+    status_result = service.check_plugin_status("C:/ComfyUI")
 
     assert model.checked_paths == ["C:/ComfyUI"]
-    assert result.success
-    assert result.data["need_repair"] == ["Joy Caption Two"]
-    assert result.data["plugin_statuses"] == [
+    assert status_result.success
+    assert status_result.code == "plugin_status_checked"
+    assert status_result.data["need_repair"] == ["Joy Caption Two"]
+    assert status_result.data["plugin_statuses"] == [
         {"name": "Joy Caption Two", "status": "需要修复"},
         {"name": "Other Plugin", "status": "已安装正确"},
     ]
@@ -177,8 +190,13 @@ def test_plugin_repair_service_validates_comfyui_layout(tmp_path: Path) -> None:
     (comfyui_root / "main.py").write_text("", encoding="utf-8")
     (comfyui_root / "web").mkdir()
 
-    assert service.validate_comfyui_dir(str(comfyui_root))
-    assert not service.validate_comfyui_dir(str(tmp_path / "empty"))
+    valid_result = service.validate_comfyui_dir(str(comfyui_root))
+    invalid_result = service.validate_comfyui_dir(str(tmp_path / "empty"))
+
+    assert valid_result.success
+    assert valid_result.code == "valid_comfyui_dir"
+    assert not invalid_result.success
+    assert invalid_result.code == "invalid_comfyui_dir"
 
 
 def test_plugin_repair_service_launches_helper_with_injected_launcher(tmp_path: Path) -> None:
@@ -200,6 +218,7 @@ def test_plugin_repair_service_launches_helper_with_injected_launcher(tmp_path: 
     result = service.launch_repair_helper()
 
     assert result.success
+    assert result.code == "helper_launched"
     assert result.data["script_path"] == str(script_path)
     assert launcher_calls == [(["python-test", str(script_path)], {})]
 
@@ -216,5 +235,6 @@ def test_plugin_repair_service_returns_error_when_helper_script_is_missing(tmp_p
     result = service.launch_repair_helper()
 
     assert not result.success
+    assert result.code == "helper_script_missing"
     assert str(missing_script) in result.message
     assert launcher_calls == []

@@ -1,14 +1,13 @@
 import os
 import json
-import csv
 import re
 import logging
 from typing import Callable, Optional
 
 # Import utilities and file manager directly, as Model handles core logic
-from .file_manager import get_output_path
 from .model_config_manager import ModelConfigManager
 from .search_service import SearchService
+from .workflow_report_service import ALL_MISSING_BASENAME, WorkflowReportService
 
 
 logger = logging.getLogger(__name__)
@@ -26,6 +25,7 @@ class AnalysisModel:
         name_corrector: Optional[Callable[[str], str]] = None,
         comfyui_path_provider: Optional[Callable[[], str]] = None,
         chrome_path_provider: Optional[Callable[[], str]] = None,
+        report_service: Optional[WorkflowReportService] = None,
     ):
         """初始化分析模型"""
         self.controller = controller
@@ -33,6 +33,7 @@ class AnalysisModel:
         self._name_corrector = name_corrector
         self._comfyui_path_provider = comfyui_path_provider
         self._chrome_path_provider = chrome_path_provider
+        self.report_service = report_service or WorkflowReportService()
 
         if controller is not None:
             if self._name_corrector is None:
@@ -376,48 +377,16 @@ class AnalysisModel:
         return sorted(missing_files_list, key=lambda x: x['file_path']) if missing_files_list else []
 
     def create_csv_file(self, missing_files, output_basename):
-        if not missing_files: return None
-        csv_file_path = get_output_path(output_basename, "csv")
-        try:
-            merged_files_for_csv = {}
-            for item_data in missing_files:
-                original_file_path = item_data['file_path'] # 这是用于报告的原始文件名
-                processed_names = self._process_name_for_search(original_file_path)
-                
-                if original_file_path not in merged_files_for_csv:
-                    merged_files_for_csv[original_file_path] = {
-                        'node_id': str(item_data['node_id']), 'node_type': item_data['node_type'],
-                        'original_file_path': original_file_path,
-                        'name_for_decision': processed_names['mapped'],       # 用于_get_search_url的第一个参数
-                        'name_for_query_embedding': processed_names['final_search_term'] # 用于_get_search_url的第二个参数
-                    }
-                else: # 合并节点ID和类型
-                    existing = merged_files_for_csv[original_file_path]
-                    existing['node_id'] = f"{existing['node_id']},{item_data['node_id']}"
-                    if item_data['node_type'] not in existing['node_type'].split(','):
-                        existing['node_type'] = f"{existing['node_type']},{item_data['node_type']}"
-            
-            final_list_for_csv = sorted(list(merged_files_for_csv.values()), key=lambda x: x['original_file_path'])
-            with open(csv_file_path, 'w', newline='', encoding='utf-8-sig') as f:
-                fieldnames = ['序号', '节点ID', '节点类型', '文件名', '状态', '下载链接', '镜像链接', '搜索链接']
-                writer = csv.DictWriter(f, fieldnames=fieldnames)
-                writer.writeheader()
-                for i, csv_item in enumerate(final_list_for_csv, 1):
-                    base_url, site_query = self._get_search_url(
-                        csv_item['name_for_decision'],
-                        csv_item['name_for_query_embedding'],
-                        csv_item['node_type']
-                    )
-                    query_param = site_query.replace(' ', '+').replace('"', '%22')
-                    search_link_url = f"https://www.bing.com/search?q={query_param}"
-                    writer.writerow({
-                        '序号': i, '节点ID': csv_item['node_id'], '节点类型': csv_item['node_type'],
-                        '文件名': csv_item['original_file_path'], # 显示原始文件名
-                        '状态': '', '下载链接': '', '镜像链接': '', '搜索链接': search_link_url
-                    })
-            logger.info(f"CSV file successfully saved to: {os.path.abspath(csv_file_path)}")
-            return csv_file_path
-        except Exception as e: logger.error(f"Error creating CSV for {output_basename}", exc_info=True); return None
+        result = self.report_service.create_missing_files_report(
+            missing_files,
+            output_basename,
+            process_name_for_search=self._process_name_for_search,
+            search_url_builder=self._get_search_url,
+        )
+        if not result.success:
+            logger.error(f"Error creating CSV for {output_basename}: {result.message}")
+            return None
+        return result.data["csv_file"]
 
 
     def search_model_links(self, csv_file, progress_callback=None):
@@ -457,17 +426,14 @@ class AnalysisModel:
 
         summary_all_missing_path, batch_results_path = None, None
         if all_missing_dict:
-            summary_all_missing_path = self.create_csv_file(list(all_missing_dict.values()), "汇总缺失文件")
+            summary_all_missing_path = self.create_csv_file(list(all_missing_dict.values()), ALL_MISSING_BASENAME)
         if results_summary:
-            try:
-                batch_results_path = get_output_path("批量处理结果", "csv")
-                with open(batch_results_path, 'w', newline='', encoding='utf-8-sig') as f:
-                    writer = csv.DictWriter(f, fieldnames=['工作流文件', 'CSV文件', '缺失数量'])
-                    writer.writeheader()
-                    for res in sorted(results_summary, key=lambda x: x['workflow']):
-                        writer.writerow({'工作流文件': os.path.basename(res['workflow']), 'CSV文件': os.path.basename(res['csv']), '缺失数量': res['missing_count']})
-                logger.info(f"Batch results summary saved to {os.path.abspath(batch_results_path)}")
-            except Exception as e: logger.error("Error creating batch results CSV", exc_info=True); batch_results_path = None
+            summary_result = self.report_service.create_batch_summary_report(results_summary)
+            if summary_result.success:
+                batch_results_path = summary_result.data["csv_file"]
+            else:
+                logger.error("Error creating batch results CSV: %s", summary_result.message)
+                batch_results_path = None
         
         logger.info("Batch processing finished.")
         if not all_missing_dict: return True

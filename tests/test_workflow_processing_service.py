@@ -3,7 +3,9 @@ from pathlib import Path
 
 import pytest
 
+from ModelFinderV2_6.operation_result import OperationResult
 from ModelFinderV2_6.workflow_processing_service import WorkflowProcessingService
+from ModelFinderV2_6.workflow_report_service import ALL_MISSING_BASENAME, BATCH_SUMMARY_HEADERS
 
 
 pytestmark = pytest.mark.unit
@@ -29,7 +31,7 @@ class _DummyAnalysisModel:
         return self.batch_result
 
 
-def test_analyze_workflow_returns_csv_ready_when_missing_files_found(tmp_path: Path) -> None:
+def test_analyze_workflow_returns_operation_result_when_csv_is_ready(tmp_path: Path) -> None:
     csv_file = tmp_path / "missing.csv"
     csv_file.write_text("", encoding="utf-8")
     service = WorkflowProcessingService(
@@ -41,41 +43,42 @@ def test_analyze_workflow_returns_csv_ready_when_missing_files_found(tmp_path: P
 
     result = service.analyze_workflow(str(tmp_path / "workflow.json"))
 
-    assert result.status == "csv_ready"
-    assert result.missing_count == 1
-    assert result.csv_file == str(csv_file)
+    assert result.success
+    assert result.code == "csv_ready"
+    assert result.data["missing_count"] == 1
+    assert result.data["csv_file"] == str(csv_file)
 
 
 @pytest.mark.parametrize(
-    ("search_result", "expected_status"),
+    ("search_result", "expected_code"),
     [
         (True, "nothing_to_search"),
         (False, "completed_without_html"),
+        (OperationResult(True, data={"html_file": "demo.html"}, code="html_ready"), "html_ready"),
     ],
 )
-def test_search_links_maps_non_html_outcomes(search_result, expected_status, tmp_path: Path) -> None:
+def test_search_links_normalizes_legacy_and_operation_results(search_result, expected_code, tmp_path: Path) -> None:
     csv_file = tmp_path / "missing.csv"
     csv_file.write_text("", encoding="utf-8")
     service = WorkflowProcessingService(_DummyAnalysisModel(search_result=search_result))
 
     result = service.search_links(str(csv_file))
 
-    assert result.status == expected_status
-    assert result.html_file is None
+    assert result.code == expected_code
 
 
 def test_batch_process_returns_summary_rows_and_latest_missing_summary_csv(tmp_path: Path) -> None:
     processed_summary_csv = tmp_path / "batch_summary.csv"
     with processed_summary_csv.open("w", newline="", encoding="utf-8-sig") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["工作流文件", "缺失数量"])
+        writer = csv.DictWriter(handle, fieldnames=[BATCH_SUMMARY_HEADERS[0], BATCH_SUMMARY_HEADERS[2]])
         writer.writeheader()
-        writer.writerow({"工作流文件": "a.json", "缺失数量": "2"})
-        writer.writerow({"工作流文件": "b.json", "缺失数量": "0"})
+        writer.writerow({BATCH_SUMMARY_HEADERS[0]: "a.json", BATCH_SUMMARY_HEADERS[2]: "2"})
+        writer.writerow({BATCH_SUMMARY_HEADERS[0]: "b.json", BATCH_SUMMARY_HEADERS[2]: "0"})
 
     results_root = tmp_path / "results"
     latest_dir = results_root / "2026-03-31"
     latest_dir.mkdir(parents=True)
-    missing_summary_csv = latest_dir / "汇总缺失文件.csv"
+    missing_summary_csv = latest_dir / f"{ALL_MISSING_BASENAME}.csv"
     missing_summary_csv.write_text("", encoding="utf-8")
 
     service = WorkflowProcessingService(
@@ -85,7 +88,8 @@ def test_batch_process_returns_summary_rows_and_latest_missing_summary_csv(tmp_p
 
     result = service.batch_process(str(tmp_path), "*.json;*")
 
-    assert result.status == "summary_ready"
-    assert result.processed_summary_csv == str(processed_summary_csv)
-    assert result.all_missing_summary_csv == str(missing_summary_csv)
-    assert result.batch_rows == [("a.json", "2"), ("b.json", "0")]
+    assert result.success
+    assert result.code == "summary_ready"
+    assert result.data["processed_summary_csv"] == str(processed_summary_csv)
+    assert result.data["all_missing_summary_csv"] == str(missing_summary_csv)
+    assert result.data["batch_rows"] == [("a.json", "2"), ("b.json", "0")]

@@ -7,3 +7,4 @@ class OperationResult:
     success: bool
     message: str = ""
     data: Any = None
+    code: str = ""
