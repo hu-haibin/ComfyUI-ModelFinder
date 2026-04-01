@@ -18,7 +18,7 @@ import tkinter as tk # Keep for critical startup errors
 
 def setup_logging():
     """Configures logging to console and file."""
-    log_level = logging.DEBUG # Set to logging.INFO for less verbose output in production
+    log_level = logging.INFO
     log_format = logging.Formatter('%(asctime)s - %(levelname)s - [%(name)s] - %(message)s')
     log_filename = "app.log" # Log filename
 

@@ -1,11 +1,25 @@
+import io
+import json
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from ModelFinderV2_6.comfyui_launcher_service import ComfyUILauncherService
+from ModelFinderV2_6.comfyui_manager_api_service import ComfyUIManagerApiService
+from ModelFinderV2_6.comfyui_runtime_api_service import ComfyUIRuntimeApiService
+from ModelFinderV2_6.dependency_environment_service import DependencyEnvironmentService
+from ModelFinderV2_6.dependency_install_planner import DependencyInstallPlanner
+from ModelFinderV2_6.dependency_preflight_service import DependencyPreflightService
+from ModelFinderV2_6.dependency_rule_service import DependencyRuleService
 from ModelFinderV2_6.irregular_mapping_service import IrregularMappingService
+from ModelFinderV2_6.missing_node_install_orchestrator import MissingNodeInstallOrchestrator
 from ModelFinderV2_6.model_config_service import ModelConfigService
+from ModelFinderV2_6.operation_result import OperationResult
 from ModelFinderV2_6.plugin_repair_service import PluginRepairService
+from ModelFinderV2_6.workflow_missing_node_service import WorkflowMissingNodeService
 
 
 pytestmark = pytest.mark.unit
@@ -88,6 +102,31 @@ class _DummyPluginRepairModel:
     def check_plugin_status(self, comfyui_path):
         self.checked_paths.append(comfyui_path)
         return list(self.need_repair)
+
+
+class _FakeProcess:
+    def __init__(self, *, pid=1234, stdout_text="", poll_result=None):
+        self.pid = pid
+        self.stdout = io.StringIO(stdout_text)
+        self._poll_result = poll_result
+        self.terminated = False
+        self.killed = False
+        self.wait_calls = []
+
+    def poll(self):
+        return self._poll_result
+
+    def terminate(self):
+        self.terminated = True
+        self._poll_result = 0
+
+    def kill(self):
+        self.killed = True
+        self._poll_result = -9
+
+    def wait(self, timeout=None):
+        self.wait_calls.append(timeout)
+        return self._poll_result
 
 
 def test_irregular_mapping_service_returns_operation_results() -> None:
@@ -238,3 +277,789 @@ def test_plugin_repair_service_returns_error_when_helper_script_is_missing(tmp_p
     assert result.code == "helper_script_missing"
     assert str(missing_script) in result.message
     assert launcher_calls == []
+
+
+def test_comfyui_launcher_service_validates_required_paths(tmp_path: Path) -> None:
+    service = ComfyUILauncherService(port_checker=lambda host, port, timeout: False)
+    comfyui_root = tmp_path / "ComfyUI"
+    comfyui_root.mkdir()
+    python_exe = tmp_path / "python.exe"
+    python_exe.write_text("", encoding="utf-8")
+
+    missing_main_result = service.validate_paths(str(comfyui_root), str(python_exe))
+
+    assert not missing_main_result.success
+    assert missing_main_result.code == "missing_main_py"
+
+    (comfyui_root / "main.py").write_text("print('ok')", encoding="utf-8")
+    success_result = service.validate_paths(str(comfyui_root), str(python_exe))
+
+    assert success_result.success
+    assert success_result.code == "paths_valid"
+    assert success_result.data["command"] == [str(python_exe), "-u", "main.py", "--enable-manager"]
+
+
+def test_comfyui_launcher_service_starts_with_expected_command_and_cwd(tmp_path: Path) -> None:
+    comfyui_root = tmp_path / "ComfyUI"
+    comfyui_root.mkdir()
+    (comfyui_root / "main.py").write_text("print('ok')", encoding="utf-8")
+    python_exe = tmp_path / "python.exe"
+    python_exe.write_text("", encoding="utf-8")
+    launcher_calls = []
+    process = _FakeProcess(stdout_text="booting\n")
+
+    def _launcher(command, **kwargs):
+        launcher_calls.append((command, kwargs))
+        return process
+
+    service = ComfyUILauncherService(process_launcher=_launcher, port_checker=lambda host, port, timeout: False)
+
+    result = service.start(str(comfyui_root), str(python_exe))
+
+    assert result.success
+    assert result.code == "launch_started"
+    assert launcher_calls == [
+        (
+            [str(python_exe), "-u", "main.py", "--enable-manager"],
+            {
+                "cwd": str(comfyui_root),
+                "stdout": subprocess.PIPE,
+                "stderr": subprocess.STDOUT,
+                "text": True,
+                "bufsize": 1,
+            },
+        )
+    ]
+
+
+def test_comfyui_launcher_service_supports_manager_only_mode(tmp_path: Path) -> None:
+    comfyui_root = tmp_path / "ComfyUI"
+    comfyui_root.mkdir()
+    (comfyui_root / "main.py").write_text("", encoding="utf-8")
+    custom_nodes = comfyui_root / "custom_nodes"
+    custom_nodes.mkdir()
+    (custom_nodes / "ComfyUI-Manager").mkdir()
+    python_exe = tmp_path / "python.exe"
+    python_exe.write_text("", encoding="utf-8")
+
+    service = ComfyUILauncherService(port_checker=lambda host, port, timeout: False)
+
+    result = service.validate_paths(str(comfyui_root), str(python_exe), launch_mode=ComfyUILauncherService.MANAGER_ONLY_MODE)
+
+    assert result.success
+    assert result.data["command"] == [
+        str(python_exe),
+        "-u",
+        "main.py",
+        "--enable-manager",
+        "--disable-all-custom-nodes",
+        "--whitelist-custom-nodes",
+        "ComfyUI-Manager",
+    ]
+
+
+def test_comfyui_launcher_service_rejects_duplicate_start(tmp_path: Path) -> None:
+    comfyui_root = tmp_path / "ComfyUI"
+    comfyui_root.mkdir()
+    (comfyui_root / "main.py").write_text("", encoding="utf-8")
+    python_exe = tmp_path / "python.exe"
+    python_exe.write_text("", encoding="utf-8")
+    process = _FakeProcess()
+    service = ComfyUILauncherService(
+        process_launcher=lambda command, **kwargs: process,
+        port_checker=lambda host, port, timeout: False,
+    )
+
+    first_result = service.start(str(comfyui_root), str(python_exe))
+    second_result = service.start(str(comfyui_root), str(python_exe))
+
+    assert first_result.success
+    assert not second_result.success
+    assert second_result.code == "already_running"
+
+
+def test_comfyui_launcher_service_stop_is_noop_without_running_process() -> None:
+    service = ComfyUILauncherService()
+
+    result = service.stop()
+
+    assert result.success
+    assert result.code == "stop_noop"
+
+
+def test_comfyui_launcher_service_shutdown_joins_reader_thread() -> None:
+    service = ComfyUILauncherService()
+    join_calls = []
+
+    class _FakeThread:
+        def is_alive(self):
+            return True
+
+        def join(self, timeout=None):
+            join_calls.append(timeout)
+
+    class _FakeStdout:
+        def close(self):
+            join_calls.append("closed")
+
+    service._reader_thread = _FakeThread()
+    service._process = SimpleNamespace(stdout=_FakeStdout(), poll=lambda: 0)
+
+    result = service.shutdown()
+
+    assert result.success
+    assert "closed" in join_calls
+
+
+def test_comfyui_launcher_service_stops_windows_process_tree(tmp_path: Path) -> None:
+    comfyui_root = tmp_path / "ComfyUI"
+    comfyui_root.mkdir()
+    (comfyui_root / "main.py").write_text("", encoding="utf-8")
+    python_exe = tmp_path / "python.exe"
+    python_exe.write_text("", encoding="utf-8")
+    process = _FakeProcess(pid=4321)
+    killed_pids = []
+
+    service = ComfyUILauncherService(
+        process_launcher=lambda command, **kwargs: process,
+        process_tree_killer=lambda pid: killed_pids.append(pid),
+        port_checker=lambda host, port, timeout: False,
+        platform_name="win32",
+    )
+    service.start(str(comfyui_root), str(python_exe))
+
+    result = service.stop()
+
+    assert result.success
+    assert result.code == "stop_completed"
+    assert killed_pids == [4321]
+
+
+def test_comfyui_launcher_service_rejects_start_when_port_is_in_use(tmp_path: Path) -> None:
+    comfyui_root = tmp_path / "ComfyUI"
+    comfyui_root.mkdir()
+    (comfyui_root / "main.py").write_text("", encoding="utf-8")
+    python_exe = tmp_path / "python.exe"
+    python_exe.write_text("", encoding="utf-8")
+    service = ComfyUILauncherService(port_checker=lambda host, port, timeout: True)
+
+    result = service.validate_paths(str(comfyui_root), str(python_exe))
+
+    assert not result.success
+    assert result.code == "port_in_use"
+    assert result.data["port"] == 8188
+
+
+def test_dependency_rule_service_loads_aki_rules(tmp_path: Path) -> None:
+    rule_root = tmp_path / "launcher_dependency_system_src"
+    rule_root.mkdir()
+    (rule_root / "data.json").write_text(
+        json.dumps(
+            {
+                "mirrors": {
+                    "additional_mirror_envs": [
+                        {"env": "XFORMERS_WINDOWS_PACKAGE", "url": "https://example.com/xformers.whl"},
+                        {"env": "INSIGHTFACE_WHEEL", "url": "insightface"},
+                    ],
+                    "extra_pip_index": ["https://pypi.example.com/ms"],
+                    "pip_find_links": ["https://mirror.example.com/torch.html"],
+                },
+                "torch_versions": [{"name": "Torch 2.6.0", "steps": []}],
+                "onnxruntime_releases": [{"engine_type": "cuda", "arguments": ["install", "onnxruntime-gpu==1.18.1"]}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    service = DependencyRuleService(rule_root_candidates=[str(rule_root)])
+
+    result = service.load_rules()
+
+    assert result.success
+    assert result.data["additional_mirror_envs"]["XFORMERS_WINDOWS_PACKAGE"] == "https://example.com/xformers.whl"
+    assert result.data["special_package_rules"]["xformers"]["strategy"] == "install_with_wheel"
+    assert result.data["special_package_rules"]["insightface"]["strategy"] == "install_with_mirror"
+    assert result.data["extra_pip_index"] == ["https://pypi.example.com/ms"]
+    assert result.data["pip_find_links"] == ["https://mirror.example.com/torch.html"]
+
+
+def test_dependency_rule_service_tolerates_invalid_utf8_and_trailing_bytes(tmp_path: Path) -> None:
+    rule_root = tmp_path / "launcher_dependency_system_src"
+    rule_root.mkdir()
+    raw_json = (
+        b'{"mirrors":{"additional_mirror_envs":[{"env":"INSIGHTFACE_WHEEL","url":"insightface"}],'
+        b'"extra_pip_index":["https://pypi.example.com/ms"],"pip_find_links":[]},'
+        b'"torch_versions":[],"onnxruntime_releases":[],"front_page_announcement":"bad'
+        + bytes([0xC4])
+        + b'"}'
+        + b"\x00\x01garbage"
+    )
+    (rule_root / "data.json").write_bytes(raw_json)
+
+    service = DependencyRuleService(rule_root_candidates=[str(rule_root)])
+
+    result = service.load_rules()
+
+    assert result.success
+    assert result.data["special_package_rules"]["insightface"]["strategy"] == "install_with_mirror"
+
+
+def test_dependency_rule_service_applies_skip_replace_and_remove_extra() -> None:
+    service = DependencyRuleService(rule_root_candidates=[])
+
+    result = service.apply_requirement_rules(
+        "demo_pkg[vision]==1.0.0",
+        skip_packages={"skip-me"},
+        replace_packages={"demo-pkg": "demo-wheel"},
+        replace_packages_pre={"==1.0.0": "==2.0.0"},
+        remove_packages_extra={"demo-wheel"},
+    )
+
+    assert result.success
+    assert result.data["name"] == "demo-wheel"
+    assert result.data["specifier"] == "==2.0.0"
+    assert result.data["removed_extras"] == ["vision"]
+    assert not result.data["skipped"]
+
+
+def test_dependency_environment_service_collects_snapshot_from_python_and_custom_nodes(tmp_path: Path) -> None:
+    comfyui_root = tmp_path / "ComfyUI"
+    custom_nodes = comfyui_root / "custom_nodes"
+    (custom_nodes / "PluginA").mkdir(parents=True)
+    (custom_nodes / "PluginB").mkdir()
+
+    calls = []
+
+    def _runner(command):
+        calls.append(command)
+        if command[-3:] == ["-m", "pip", "list"]:
+            return {"success": False, "returncode": 0, "stdout": "", "stderr": ""}
+        if command[1:4] == ["-m", "pip", "list"]:
+            return {
+                "success": True,
+                "returncode": 0,
+                "stdout": json.dumps([{"name": "numpy", "version": "1.26.4"}]),
+                "stderr": "",
+            }
+        return {
+            "success": True,
+            "returncode": 0,
+            "stdout": json.dumps({"python_version": "3.11.6", "platform": "win32", "torch_version": "2.6.0", "torch_cuda": "12.4"}),
+            "stderr": "",
+        }
+
+    service = DependencyEnvironmentService(
+        python_path_provider=lambda: sys.executable,
+        comfyui_path_provider=lambda: str(comfyui_root),
+        command_runner=_runner,
+    )
+
+    result = service.collect_environment_snapshot()
+
+    assert result.success
+    assert result.data["pip_packages"] == {"numpy": "1.26.4"}
+    assert result.data["installed_plugins"] == ["PluginA", "PluginB"]
+    assert result.data["torch_version"] == "2.6.0"
+    assert len(calls) == 2
+
+
+def test_dependency_preflight_service_detects_conflicts_and_special_policy(tmp_path: Path) -> None:
+    comfyui_root = tmp_path / "ComfyUI"
+    custom_nodes = comfyui_root / "custom_nodes"
+    plugin_a = custom_nodes / "PluginA"
+    plugin_b = custom_nodes / "PluginB"
+    plugin_c = custom_nodes / "PluginC"
+    plugin_a.mkdir(parents=True)
+    plugin_b.mkdir()
+    plugin_c.mkdir()
+    (plugin_a / "requirements.txt").write_text("xformers==0.0.29.post3\nshared-lib==1.0.0\n", encoding="utf-8")
+    (plugin_b / "requirements.txt").write_text("shared-lib==2.0.0\n", encoding="utf-8")
+
+    rule_root = tmp_path / "rules"
+    rule_root.mkdir()
+    (rule_root / "data.json").write_text(
+        json.dumps(
+            {
+                "mirrors": {
+                    "additional_mirror_envs": [
+                        {"env": "XFORMERS_WINDOWS_PACKAGE", "url": "https://example.com/xformers.whl"},
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    environment_service = SimpleNamespace(
+        collect_environment_snapshot=lambda: OperationResult(
+            True,
+            data={
+                "python_path": sys.executable,
+                "python_version": "3.11.6",
+                "platform": "win32",
+                "torch_version": "2.6.0",
+                "torch_cuda": "12.4",
+                "pip_packages": {"shared-lib": "1.0.0"},
+                "installed_plugins": ["PluginA", "PluginB"],
+                "comfyui_path": str(comfyui_root),
+            },
+        )
+    )
+    preflight_service = DependencyPreflightService(
+        environment_service=environment_service,
+        rule_service=DependencyRuleService(rule_root_candidates=[str(rule_root)]),
+    )
+
+    packages = [
+        {"id": "PluginA", "title": "PluginA", "metadata": {}, "queue_action": "install"},
+        {"id": "PluginB", "title": "PluginB", "metadata": {}, "queue_action": "install"},
+        {"id": "PluginC", "title": "PluginC", "metadata": {}, "queue_action": "install"},
+    ]
+
+    result = preflight_service.evaluate(packages)
+
+    assert result.success
+    rows = {item["id"]: item for item in result.data["rows"]}
+    assert rows["PluginA"]["conclusion"] == "blocked"
+    assert rows["PluginA"]["strategy"] == "defer_manual"
+    assert rows["PluginB"]["conclusion"] == "blocked"
+    assert rows["PluginC"]["conclusion"] == "warning"
+    assert result.data["summary"]["blocked"] == 2
+
+
+def test_dependency_install_planner_blocks_or_filters_based_on_preflight() -> None:
+    planner = DependencyInstallPlanner()
+    packages = [
+        {"id": "safe-pack", "title": "Safe Pack", "queue_action": "install"},
+        {"id": "blocked-pack", "title": "Blocked Pack", "queue_action": "install"},
+        {"id": "warn-pack", "title": "Warn Pack", "queue_action": "install"},
+    ]
+    preflight = {
+        "rows": [
+            {"id": "safe-pack", "conclusion": "safe", "strategy": "install"},
+            {"id": "blocked-pack", "conclusion": "blocked", "strategy": "defer_manual", "reasons": ["conflict"]},
+            {"id": "warn-pack", "conclusion": "warning", "strategy": "install"},
+        ]
+    }
+
+    blocked_result = planner.build_execution_plan(packages, preflight)
+    safe_only_result = planner.build_execution_plan(packages, preflight, safe_only=True)
+
+    assert not blocked_result.success
+    assert blocked_result.code == "dependency_execution_blocked"
+    assert [item["id"] for item in safe_only_result.data["executable_packages"]] == ["safe-pack"]
+
+
+def test_comfyui_runtime_api_service_reads_registered_node_types() -> None:
+    service = ComfyUIRuntimeApiService(
+        base_url_provider=lambda: "http://127.0.0.1:8188",
+        http_requester=lambda **kwargs: (
+            200,
+            json.dumps(
+                {
+                    "KSampler": {"input": {}},
+                    "CheckpointLoaderSimple": {"input": {}},
+                }
+            ),
+        ),
+    )
+
+    result = service.get_registered_node_types()
+
+    assert result.success
+    assert result.code == "registered_node_types_loaded"
+    assert result.data["count"] == 2
+    assert "KSampler" in result.data["node_types"]
+
+
+def test_comfyui_manager_api_service_queues_install_and_starts_queue() -> None:
+    calls = []
+
+    def _requester(**kwargs):
+        calls.append(kwargs)
+        return 200, "{}"
+
+    service = ComfyUIManagerApiService(
+        base_url_provider=lambda: "http://127.0.0.1:8188",
+        http_requester=_requester,
+    )
+
+    metadata = {"id": "impact-pack", "title": "Impact Pack", "version": "unknown", "files": ["https://repo"], "channel": "default", "mode": "default"}
+    queue_result = service.queue_install(metadata)
+    start_result = service.start_queue()
+
+    assert queue_result.success
+    assert start_result.success
+    assert calls[0]["method"] == "POST"
+    assert calls[0]["payload"]["id"] == "impact-pack"
+    assert calls[1]["url"].endswith("/manager/queue/start")
+
+
+def test_comfyui_manager_api_service_supports_import_fail_bulk_and_fix_queue() -> None:
+    calls = []
+
+    def _requester(**kwargs):
+        calls.append(kwargs)
+        if kwargs["url"].endswith("/v2/customnode/import_fail_info_bulk"):
+            return 200, json.dumps({"impact-pack": {"error": "ImportError"}})
+        return 200, "{}"
+
+    service = ComfyUIManagerApiService(
+        base_url_provider=lambda: "http://127.0.0.1:8188",
+        http_requester=_requester,
+    )
+
+    import_fail_result = service.get_import_fail_info_bulk(cnr_ids=["impact-pack"])
+    fix_result = service.queue_fix({"id": "impact-pack", "version": "1.0.0"})
+
+    assert import_fail_result.success
+    assert import_fail_result.data["impact-pack"]["error"] == "ImportError"
+    assert fix_result.success
+    assert calls[1]["url"].endswith("/manager/queue/fix")
+
+
+def test_workflow_missing_node_service_collects_files_and_analyzes_missing_nodes(tmp_path: Path) -> None:
+    workflow_file = tmp_path / "workflow.json"
+    workflow_file.write_text(
+        json.dumps(
+            {
+                "nodes": [
+                    {"id": 1, "class_type": "KSampler"},
+                    {"id": 2, "class_type": "ImpactWildcardProcessor"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    nested_dir = tmp_path / "nested"
+    nested_dir.mkdir()
+    (nested_dir / "other.json").write_text(json.dumps({"prompt": {"3": {"class_type": "CLIPTextEncode"}}}), encoding="utf-8")
+
+    service = WorkflowMissingNodeService()
+    files_result = service.collect_workflow_files([str(tmp_path)])
+    analysis_result = service.analyze_missing_node_types(files_result.data["workflow_files"], {"KSampler"})
+
+    assert files_result.success
+    assert files_result.data["count"] == 2
+    assert analysis_result.success
+    assert sorted(analysis_result.data["missing_node_types"]) == ["CLIPTextEncode", "ImpactWildcardProcessor"]
+
+
+def test_workflow_missing_node_service_extracts_frontend_exported_node_types() -> None:
+    service = WorkflowMissingNodeService()
+
+    result = service.extract_node_types(
+        {
+            "nodes": [
+                {"id": 1, "type": "InstantIDFaceAnalysis"},
+                {"id": 2, "type": "QG_KeyNode"},
+                {"id": 3, "type": "InstantIDFaceAnalysis"},
+            ]
+        }
+    )
+
+    assert result.success
+    assert result.data["count"] == 2
+    assert result.data["node_types"] == ["InstantIDFaceAnalysis", "QG_KeyNode"]
+
+
+def test_workflow_missing_node_service_extracts_node_descriptors_with_ids() -> None:
+    service = WorkflowMissingNodeService()
+
+    result = service.extract_node_descriptors(
+        {
+            "nodes": [
+                {
+                    "id": 1,
+                    "type": "InstantIDFaceAnalysis",
+                    "properties": {"cnr_id": "comfyui_instantid"},
+                },
+                {
+                    "id": 2,
+                    "type": "ApplyInstantIDAdvanced",
+                    "properties": {"aux_id": "sunxAI/comfyui_sunxAI_facetools"},
+                },
+            ]
+        }
+    )
+
+    assert result.success
+    assert result.data["count"] == 2
+    assert result.data["nodes"][0]["aux_id"] == "sunxAI/comfyui_sunxAI_facetools"
+    assert result.data["nodes"][1]["cnr_id"] == "comfyui_instantid"
+
+
+def test_workflow_missing_node_service_supports_mixed_prompt_and_canvas_formats(tmp_path: Path) -> None:
+    workflow_file = tmp_path / "mixed.json"
+    workflow_file.write_text(
+        json.dumps(
+            {
+                "nodes": [
+                    {"id": 1, "type": "InstantIDFaceAnalysis"},
+                    {"id": 2, "type": "PuLIDLoader"},
+                ],
+                "prompt": {
+                    "3": {"class_type": "KSampler"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    service = WorkflowMissingNodeService()
+    analysis_result = service.analyze_missing_node_types([str(workflow_file)], {"KSampler"})
+
+    assert analysis_result.success
+    assert sorted(analysis_result.data["missing_node_types"]) == ["InstantIDFaceAnalysis", "PuLIDLoader"]
+
+
+def test_missing_node_install_orchestrator_prepares_deduplicated_install_plan(tmp_path: Path) -> None:
+    workflow_file = tmp_path / "workflow.json"
+    workflow_file.write_text(
+        json.dumps(
+            {
+                "nodes": [
+                    {"class_type": "ImpactWildcardProcessor"},
+                    {"class_type": "ImpactWildcardProcessor"},
+                    {"class_type": "UnknownCustomNode"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    runtime_api = SimpleNamespace(
+        get_registered_node_types=lambda: SimpleNamespace(success=True, data={"node_types": ["KSampler"]}),
+    )
+    manager_api = SimpleNamespace(
+        is_available=lambda: SimpleNamespace(success=True, data={"value": "3.32.3"}),
+        get_db_mode=lambda: SimpleNamespace(success=True, data={"value": "default"}),
+        get_node_mappings=lambda mode: SimpleNamespace(
+            success=True,
+            data={
+                "impact-pack": [
+                    ["ImpactWildcardProcessor"],
+                    {"title_aux": "Impact Pack"},
+                ]
+            },
+        ),
+        get_custom_node_list=lambda mode: SimpleNamespace(
+            success=True,
+            data={
+                "channel": "default",
+                "node_packs": {
+                    "impact-pack": {
+                        "id": "impact-pack",
+                        "title": "Impact Pack",
+                        "state": "not-installed",
+                        "version": "unknown",
+                        "files": ["https://repo"],
+                        "channel": "default",
+                        "mode": "default",
+                    }
+                }
+            },
+        ),
+        get_installed_nodes=lambda mode="default": SimpleNamespace(success=True, data={}),
+        get_import_fail_info_bulk=lambda **kwargs: SimpleNamespace(success=True, data={}),
+    )
+    orchestrator = MissingNodeInstallOrchestrator(runtime_api, manager_api, WorkflowMissingNodeService())
+
+    result = orchestrator.prepare_install_plan([str(workflow_file)])
+
+    assert result.success
+    assert len(result.data["install_plan"]) == 1
+    assert result.data["install_plan"][0]["missing_count"] == 1
+    assert result.data["install_plan"][0]["queue_action"] == "install"
+    assert result.data["install_plan"][0]["metadata"]["channel"] == "default"
+    assert result.data["install_plan"][0]["metadata"]["mode"] == "default"
+    assert result.data["install_plan"][0]["metadata"]["ui_id"] == "impact-pack"
+    assert result.data["manual_items"] == [{"node_type": "UnknownCustomNode", "reason": "未找到可自动映射的插件包。"}]
+
+
+def test_missing_node_install_orchestrator_keeps_installed_missing_packages_visible(tmp_path: Path) -> None:
+    workflow_file = tmp_path / "workflow.json"
+    workflow_file.write_text(json.dumps({"nodes": [{"type": "ImpactWildcardProcessor"}]}), encoding="utf-8")
+
+    runtime_api = SimpleNamespace(
+        get_registered_node_types=lambda: SimpleNamespace(success=True, data={"node_types": ["KSampler"]}),
+    )
+    manager_api = SimpleNamespace(
+        is_available=lambda: SimpleNamespace(success=True, data={"value": "3.32.3"}),
+        get_db_mode=lambda: SimpleNamespace(success=True, data={"value": "default"}),
+        get_node_mappings=lambda mode: SimpleNamespace(
+            success=True,
+            data={"impact-pack": [["ImpactWildcardProcessor"], {"title_aux": "Impact Pack"}]},
+        ),
+        get_custom_node_list=lambda mode: SimpleNamespace(
+            success=True,
+            data={
+                "channel": "default",
+                "node_packs": {
+                    "impact-pack": {
+                        "id": "impact-pack",
+                        "title": "Impact Pack",
+                        "name": "ComfyUI-Impact-Pack",
+                        "state": "not-installed",
+                        "version": "unknown",
+                        "files": ["https://github.com/ltdrdata/ComfyUI-Impact-Pack"],
+                        "channel": "default",
+                        "mode": "default",
+                    }
+                }
+            },
+        ),
+        get_installed_nodes=lambda mode="default": SimpleNamespace(
+            success=True,
+            data={"impact-pack": {"id": "impact-pack", "title": "Impact Pack"}},
+        ),
+        get_import_fail_info_bulk=lambda **kwargs: SimpleNamespace(success=True, data={}),
+    )
+    orchestrator = MissingNodeInstallOrchestrator(runtime_api, manager_api, WorkflowMissingNodeService())
+
+    result = orchestrator.prepare_install_plan([str(workflow_file)])
+
+    assert result.success
+    assert len(result.data["install_plan"]) == 1
+    assert result.data["install_plan"][0]["state"] == "installed"
+    assert result.data["install_plan"][0]["queue_action"] == ""
+    assert result.data["manual_items"] == []
+
+
+def test_missing_node_install_orchestrator_executes_selected_packages() -> None:
+    queued = []
+    fixed = []
+    enabled = []
+    reinstalled = []
+    updated = []
+    started = []
+    manager_api = SimpleNamespace(
+        queue_install=lambda metadata, **kwargs: queued.append(metadata["id"]) or SimpleNamespace(success=True),
+        queue_fix=lambda metadata: fixed.append(metadata["id"]) or SimpleNamespace(success=True),
+        queue_reinstall=lambda metadata: reinstalled.append(metadata["id"]) or SimpleNamespace(success=True),
+        queue_update=lambda metadata: updated.append(metadata["id"]) or SimpleNamespace(success=True),
+        start_queue=lambda: started.append(True) or SimpleNamespace(success=True),
+    )
+    orchestrator = MissingNodeInstallOrchestrator(SimpleNamespace(), manager_api, WorkflowMissingNodeService())
+
+    result = orchestrator.execute_install_plan(
+        [
+            {"id": "impact-pack", "title": "Impact Pack", "queue_action": "install", "metadata": {"id": "impact-pack"}},
+            {"id": "was-suite", "title": "WAS Suite", "queue_action": "fix", "metadata": {"id": "was-suite"}},
+            {"id": "disabled-pack", "title": "Disabled Pack", "queue_action": "enable", "metadata": {"id": "disabled-pack"}},
+            {"id": "invalid-pack", "title": "Invalid Pack", "queue_action": "reinstall", "metadata": {"id": "invalid-pack"}},
+            {"id": "enabled-pack", "title": "Enabled Pack", "queue_action": "update", "metadata": {"id": "enabled-pack"}},
+        ]
+    )
+
+    assert result.success
+    assert queued == ["impact-pack", "disabled-pack"]
+    assert fixed == ["was-suite"]
+    assert reinstalled == ["invalid-pack"]
+    assert updated == ["enabled-pack"]
+    assert started == [True]
+    assert result.data["restart_required"] is True
+
+
+def test_missing_node_install_orchestrator_keeps_installed_rows_in_missing_results(tmp_path: Path) -> None:
+    workflow_file = tmp_path / "workflow.json"
+    workflow_file.write_text(json.dumps({"nodes": [{"type": "ImpactWildcardProcessor"}]}), encoding="utf-8")
+
+    runtime_api = SimpleNamespace(
+        get_registered_node_types=lambda: SimpleNamespace(success=True, data={"node_types": ["KSampler"]}),
+    )
+    manager_api = SimpleNamespace(
+        is_available=lambda: SimpleNamespace(success=True, data={"value": "3.32.3"}),
+        get_db_mode=lambda: SimpleNamespace(success=True, data={"value": "default"}),
+        get_node_mappings=lambda mode: SimpleNamespace(
+            success=True,
+            data={"impact-pack": [["ImpactWildcardProcessor"], {"title_aux": "Impact Pack"}]},
+        ),
+        get_custom_node_list=lambda mode: SimpleNamespace(
+            success=True,
+            data={
+                "channel": "default",
+                "node_packs": {
+                    "impact-pack": {
+                        "id": "impact-pack",
+                        "title": "Impact Pack",
+                        "name": "ComfyUI-Impact-Pack",
+                        "state": "not-installed",
+                        "version": "unknown",
+                        "files": ["https://github.com/ltdrdata/ComfyUI-Impact-Pack"],
+                    }
+                },
+            },
+        ),
+        get_installed_nodes=lambda mode="default": SimpleNamespace(
+            success=True,
+            data={"impact-pack": {"id": "impact-pack", "title": "Impact Pack"}},
+        ),
+        get_import_fail_info_bulk=lambda **kwargs: SimpleNamespace(success=True, data={}),
+    )
+    orchestrator = MissingNodeInstallOrchestrator(runtime_api, manager_api, WorkflowMissingNodeService())
+
+    result = orchestrator.prepare_install_plan([str(workflow_file)])
+
+    assert result.success
+    assert len(result.data["install_plan"]) == 1
+    assert result.data["install_plan"][0]["state"] == "installed"
+    assert result.data["install_plan"][0]["status"] == "当前状态"
+    assert result.data["manual_items"] == []
+
+
+def test_missing_node_install_orchestrator_surfaces_import_failed_candidates(tmp_path: Path) -> None:
+    workflow_file = tmp_path / "workflow.json"
+    workflow_file.write_text(
+        json.dumps(
+            {
+                "nodes": [
+                    {
+                        "type": "InstantIDFaceAnalysis",
+                        "properties": {"cnr_id": "comfyui_sunxai_facetools"},
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    runtime_api = SimpleNamespace(
+        get_registered_node_types=lambda: SimpleNamespace(success=True, data={"node_types": ["KSampler"]}),
+    )
+    manager_api = SimpleNamespace(
+        is_available=lambda: SimpleNamespace(success=True, data={"value": "3.32.3"}),
+        get_db_mode=lambda: SimpleNamespace(success=True, data={"value": "default"}),
+        get_node_mappings=lambda mode: SimpleNamespace(success=True, data={}),
+        get_custom_node_list=lambda mode: SimpleNamespace(
+            success=True,
+            data={
+                "channel": "default",
+                "node_packs": {
+                    "comfyui_sunxai_facetools": {
+                        "id": "comfyui_sunxai_facetools",
+                        "title": "comfyui_sunxAI_facetools",
+                        "state": "installed",
+                        "version": "0.2.7",
+                        "repository": "https://github.com/sunxAI/comfyui_sunxAI_facetools",
+                    }
+                },
+            },
+        ),
+        get_installed_nodes=lambda mode="default": SimpleNamespace(
+            success=True,
+            data={"comfyui_sunxai_facetools": {"id": "comfyui_sunxai_facetools", "title": "comfyui_sunxAI_facetools"}},
+        ),
+        get_import_fail_info_bulk=lambda **kwargs: SimpleNamespace(
+            success=True,
+            data={"comfyui_sunxai_facetools": {"error": "ImportError"}},
+        ),
+    )
+    orchestrator = MissingNodeInstallOrchestrator(runtime_api, manager_api, WorkflowMissingNodeService())
+
+    result = orchestrator.prepare_install_plan([str(workflow_file)])
+
+    assert result.success
+    assert result.data["install_plan"][0]["state"] == "import-fail"
+    assert result.data["install_plan"][0]["status"] == "待修复"
+    assert result.data["install_plan"][0]["queue_action"] == "fix"

@@ -2,6 +2,7 @@
 import os
 import random
 import threading
+import time
 import webbrowser
 import tkinter as tk
 from tkinter import filedialog
@@ -14,11 +15,20 @@ from .irregular_names_model import IrregularNamesModel
 from .settings_model import SettingsModel
 from .analysis_model import AnalysisModel
 from .application_runtime_service import ApplicationRuntimeService
+from .comfyui_launcher_service import ComfyUILauncherService
+from .comfyui_manager_api_service import ComfyUIManagerApiService
+from .comfyui_runtime_api_service import ComfyUIRuntimeApiService
+from .dependency_environment_service import DependencyEnvironmentService
+from .dependency_install_planner import DependencyInstallPlanner
+from .dependency_preflight_service import DependencyPreflightService
+from .dependency_rule_service import DependencyRuleService
 from .irregular_mapping_service import IrregularMappingService
+from .missing_node_install_orchestrator import MissingNodeInstallOrchestrator
 from .model_config_service import ModelConfigService
 from .plugin_repair import PluginRepairModel  # 导入插件修复模型
 from .plugin_repair_service import PluginRepairService
 from .result_view_service import ResultViewService
+from .workflow_missing_node_service import WorkflowMissingNodeService
 from .workflow_processing_service import WorkflowProcessingService
 from . import __version__, __author__
 
@@ -43,6 +53,29 @@ class AppController:
         self.model_config_service = ModelConfigService(self.analysis_model.config_manager)
         self.workflow_processing_service = WorkflowProcessingService(self.analysis_model)
         self.plugin_repair_service = PluginRepairService(self.plugin_repair_model)
+        self.comfyui_launcher_service = ComfyUILauncherService()
+        self.comfyui_runtime_api_service = ComfyUIRuntimeApiService(
+            base_url_provider=self.comfyui_launcher_service.get_launch_url,
+        )
+        self.comfyui_manager_api_service = ComfyUIManagerApiService(
+            base_url_provider=self.comfyui_launcher_service.get_launch_url,
+        )
+        self.workflow_missing_node_service = WorkflowMissingNodeService()
+        self.missing_node_install_orchestrator = MissingNodeInstallOrchestrator(
+            self.comfyui_runtime_api_service,
+            self.comfyui_manager_api_service,
+            self.workflow_missing_node_service,
+        )
+        self.dependency_rule_service = DependencyRuleService()
+        self.dependency_environment_service = DependencyEnvironmentService(
+            python_path_provider=self.get_active_comfyui_python_path,
+            comfyui_path_provider=self.get_active_comfyui_path,
+        )
+        self.dependency_preflight_service = DependencyPreflightService(
+            environment_service=self.dependency_environment_service,
+            rule_service=self.dependency_rule_service,
+        )
+        self.dependency_install_planner = DependencyInstallPlanner()
         self.result_view_service = ResultViewService()
         self.runtime_service = ApplicationRuntimeService()
 
@@ -54,7 +87,31 @@ class AppController:
         self._loaded_theme = "cosmo"
         self._loaded_chrome_path = ""
         self._loaded_comfyui_path = ""
+        self._loaded_comfyui_python_path = ""
         self._loaded_retention_days = 30
+        self._comfyui_runtime_poll_scheduled = False
+        self._last_comfyui_runtime_state = "idle"
+        self._comfyui_browser_opened = False
+        self._manager_queue_poll_scheduled = False
+        self._missing_installer_step = 0
+        self._missing_installer_completed_steps = set()
+        self._missing_installer_selected_paths = []
+        self._missing_installer_analysis_result = None
+        self._missing_installer_install_plan = []
+        self._missing_installer_preflight_result = None
+        self._missing_installer_manual_items = []
+        self._missing_installer_recheck_paths = []
+        self._pending_missing_analysis = False
+        self._pending_missing_recheck = False
+        self._missing_installer_restart_available = False
+        self._missing_installer_launch_mode = ComfyUILauncherService.DEFAULT_MODE
+        self._is_shutting_down = False
+        self._manager_runtime_status_label = "未启动"
+        self._manager_runtime_ready = False
+        self._manager_runtime_check_inflight = False
+        self._manager_runtime_last_check = 0.0
+        self._pending_runtime_wait_deadline = 0.0
+        self._missing_runtime_wait_logged = False
 
         self.status_var = tk.StringVar(value="初始化...")
         logger.info("AppController initialized.")
@@ -76,6 +133,9 @@ class AppController:
         self.refresh_plugin_repair_view()
         
         self.view.set_controller(self) # Then set controller in view (triggers view update)
+        self.refresh_comfyui_launch_runtime()
+        self.refresh_missing_node_installer_runtime()
+        self._sync_missing_node_installer_view()
         self.show_welcome_message()   # Then show welcome message
         logger.debug("Controller initialize sequence finished.")
 
@@ -83,11 +143,16 @@ class AppController:
     def get_loaded_theme_preference(self): return self._loaded_theme
     def get_loaded_chrome_path(self): return self._loaded_chrome_path
     def get_loaded_comfyui_path(self): return self._loaded_comfyui_path
+    def get_loaded_comfyui_python_path(self): return self._loaded_comfyui_python_path
     def get_loaded_retention_days(self): return self._loaded_retention_days
 
     def get_active_comfyui_path(self):
         comfyui_path = self.view.get_comfyui_path().strip() if self.view else ""
         return comfyui_path or self._loaded_comfyui_path
+
+    def get_active_comfyui_python_path(self):
+        python_path = self.view.get_comfyui_python_path().strip() if self.view else ""
+        return python_path or self._loaded_comfyui_python_path
 
     # --- Core Logic Methods ---
 
@@ -103,6 +168,9 @@ class AppController:
         self.view.set_window_title(f"ComfyUI模型查找器 - Model Finder v{self.__version__} (WeChat: {self.__author__})")
 
     def update_status(self, message):
+        current_status = self.status_var.get()
+        if current_status == message:
+            return
         logger.debug(f"Updating status bar to: {message}")
         self.status_var.set(message)
 
@@ -142,6 +210,55 @@ class AppController:
             self.view.set_chrome_path(chrome_path)
         else:
             logger.debug("Chrome path selection cancelled.")
+
+    def browse_comfyui_launch_path(self):
+        logger.debug("Browse ComfyUI launch path button clicked.")
+        dir_path = filedialog.askdirectory(title="选择 ComfyUI 安装目录")
+        if not dir_path:
+            logger.debug("ComfyUI launch path selection cancelled.")
+            return
+
+        logger.info(f"ComfyUI launch path selected: {dir_path}")
+        self._loaded_comfyui_path = dir_path
+        if hasattr(self.view, "set_comfyui_path"):
+            self.view.set_comfyui_path(dir_path)
+
+    def browse_comfyui_python_path(self):
+        logger.debug("Browse ComfyUI Python path button clicked.")
+        python_path = filedialog.askopenfilename(
+            title="选择 Python 可执行文件",
+            filetypes=[("可执行文件", "*.exe"), ("所有文件", "*.*")],
+        )
+        if not python_path:
+            logger.debug("ComfyUI Python path selection cancelled.")
+            return
+
+        logger.info(f"ComfyUI Python path selected: {python_path}")
+        self._loaded_comfyui_python_path = python_path
+        if hasattr(self.view, "set_comfyui_python_path"):
+            self.view.set_comfyui_python_path(python_path)
+
+    def _get_workflow_mode(self):
+        mode = self.view.get_workflow_mode() if hasattr(self.view, "get_workflow_mode") else "single"
+        return "batch" if mode == "batch" else "single"
+
+    def browse_workflow_input(self):
+        if self._get_workflow_mode() == "batch":
+            self.browse_workflow_dir()
+            return
+        self.browse_workflow()
+
+    def start_workflow_processing(self):
+        if self._get_workflow_mode() == "batch":
+            self.batch_process()
+            return
+        self.analyze_and_search()
+
+    def view_workflow_result(self):
+        if self._get_workflow_mode() == "batch":
+            self.view_batch_html()
+            return
+        self.view_result()
 
     def analyze_and_search(self):
         logger.info("Analyze and Search button clicked.")
@@ -498,19 +615,7 @@ class AppController:
     def save_settings(self):
         logger.info("Save settings button clicked.")
         try:
-            retention_days_from_view = self.view.get_retention_days()
-            logger.debug(f"Value from view for retention_days: {retention_days_from_view}")
-
-            settings_to_save = {
-                'auto_open_html': self.auto_open_html.get(),
-                'chrome_path': self.view.get_chrome_path(),
-                'comfyui_path': self.view.get_comfyui_path(),
-                'random_theme': self.random_theme.get(),
-                
-                'theme': self.view.get_selected_theme(), # Saves the theme currently selected in the view's combobox.
-                'retention_days': retention_days_from_view
-            }
-            logger.debug(f"Data to be saved: {settings_to_save}")
+            settings_to_save = self._collect_settings_for_save()
 
             self.view.update_log("正在保存设置...") # User message
             success = self.settings_model.save(settings_to_save)
@@ -541,11 +646,13 @@ class AppController:
         self._loaded_theme = loaded_settings.get('theme', 'cosmo')
         self._loaded_chrome_path = loaded_settings.get('chrome_path', '')
         self._loaded_comfyui_path = loaded_settings.get('comfyui_path', '')
+        self._loaded_comfyui_python_path = loaded_settings.get('comfyui_python_path', '')
         self._loaded_retention_days = loaded_settings.get('retention_days', 30)
         logger.debug(
             f"Loaded settings values: AutoOpen={self.auto_open_html.get()}, "
             f"RandomTheme={self.random_theme.get()}, Theme={self._loaded_theme}, "
             f"Chrome='{self._loaded_chrome_path}', ComfyUI='{self._loaded_comfyui_path}', "
+            f"ComfyUIPython='{self._loaded_comfyui_python_path}', "
             f"Days={self._loaded_retention_days}"
         )
 
@@ -576,6 +683,791 @@ class AppController:
 
         self.view.update_log("设置加载完成。") # User message
         # Don't set status to "Ready" here, let initialize do it after welcome msg.
+
+    def _collect_settings_for_save(self):
+        retention_days_from_view = self.view.get_retention_days()
+        logger.debug(f"Value from view for retention_days: {retention_days_from_view}")
+
+        settings_to_save = {
+            'auto_open_html': self.auto_open_html.get(),
+            'chrome_path': self.view.get_chrome_path(),
+            'comfyui_path': self.view.get_comfyui_path(),
+            'comfyui_python_path': self.view.get_comfyui_python_path() if hasattr(self.view, "get_comfyui_python_path") else "",
+            'random_theme': self.random_theme.get(),
+            'theme': self.view.get_selected_theme(),
+            'retention_days': retention_days_from_view
+        }
+        logger.debug(f"Data to be saved: {settings_to_save}")
+        return settings_to_save
+
+    def save_comfyui_launch_settings(self):
+        logger.info("Save ComfyUI launch settings button clicked.")
+        try:
+            settings_to_save = self._collect_settings_for_save()
+            self.view.append_comfyui_launch_log("正在保存 ComfyUI 启动配置...")
+            success = self.settings_model.save(settings_to_save)
+            if success:
+                self._loaded_comfyui_path = settings_to_save["comfyui_path"]
+                self._loaded_comfyui_python_path = settings_to_save["comfyui_python_path"]
+                self.update_status("ComfyUI 启动配置已保存")
+                self.view.append_comfyui_launch_log("ComfyUI 启动配置已保存。")
+            else:
+                self.update_status("保存 ComfyUI 启动配置失败")
+                self.view.append_comfyui_launch_log("保存 ComfyUI 启动配置失败。")
+        except Exception as e:
+            logger.error("保存 ComfyUI 启动配置时发生意外错误", exc_info=True)
+            self.update_status("保存 ComfyUI 启动配置时发生意外错误")
+            self.view.append_comfyui_launch_log("保存 ComfyUI 启动配置时发生意外错误。")
+            self.view.append_comfyui_launch_log(str(e))
+
+    def validate_comfyui_launch_paths(self):
+        logger.info("Validate ComfyUI launch paths button clicked.")
+        result = self.comfyui_launcher_service.validate_paths(
+            self.view.get_comfyui_path(),
+            self.view.get_comfyui_python_path(),
+        )
+        if result.success:
+            self.view.append_comfyui_launch_log("路径校验通过。")
+            self.update_status("ComfyUI 路径校验通过")
+            return True
+
+        self.view.append_comfyui_launch_log(result.message)
+        self.update_status("ComfyUI 路径校验失败")
+        return False
+
+    def start_comfyui(self):
+        logger.info("Start ComfyUI button clicked.")
+        self._start_comfyui_with_mode(ComfyUILauncherService.DEFAULT_MODE)
+
+    def _start_comfyui_with_mode(self, launch_mode):
+        validation_result = self.comfyui_launcher_service.validate_paths(
+            self.view.get_comfyui_path(),
+            self.view.get_comfyui_python_path(),
+            launch_mode=launch_mode,
+        )
+        if not validation_result.success:
+            self.view.append_comfyui_launch_log(validation_result.message)
+            self.update_status("ComfyUI 启动前校验失败")
+            self.refresh_comfyui_launch_runtime()
+            return
+
+        command_text = " ".join(validation_result.data["command"])
+        self.view.clear_comfyui_launch_log()
+        self.view.append_comfyui_launch_log(f"启动命令: {command_text}")
+        self.view.append_comfyui_launch_log(f"访问地址: {validation_result.data['url']}")
+        if launch_mode == ComfyUILauncherService.MANAGER_ONLY_MODE:
+            self.view.append_comfyui_launch_log("启动模式: 仅加载 ComfyUI-Manager")
+        self.view.set_comfyui_launch_status("启动中")
+        self.view.set_comfyui_launch_details(pid="", command=command_text)
+        self.view.set_comfyui_launch_button_states(start_enabled=False, stop_enabled=False)
+        self.update_status("ComfyUI 启动中...")
+        self._comfyui_browser_opened = False
+
+        result = self.comfyui_launcher_service.start(
+            validation_result.data["comfyui_path"],
+            validation_result.data["python_path"],
+            launch_mode=launch_mode,
+        )
+        if not result.success:
+            self.view.append_comfyui_launch_log(result.message)
+            self.update_status("ComfyUI 启动失败")
+            self.refresh_comfyui_launch_runtime()
+            return
+
+        self.view.append_comfyui_launch_log("ComfyUI 已启动，正在读取日志...")
+        self.refresh_comfyui_launch_runtime(snapshot=result.data)
+        self._schedule_comfyui_runtime_poll()
+
+    def stop_comfyui(self):
+        logger.info("Stop ComfyUI button clicked.")
+        result = self.comfyui_launcher_service.stop()
+        self.view.append_comfyui_launch_log(result.message)
+        self.update_status("ComfyUI 已停止" if result.code == "stop_completed" else "当前没有运行中的 ComfyUI")
+        self._comfyui_browser_opened = False
+        self.refresh_comfyui_launch_runtime(snapshot=result.data)
+
+    def clear_comfyui_launch_log(self):
+        self.view.clear_comfyui_launch_log()
+
+    def clear_missing_installer_log(self):
+        self.view.clear_missing_installer_log()
+
+    def add_missing_installer_quick_path(self, auto_analyze=False):
+        raw_path = self.view.get_missing_installer_quick_path()
+        self._add_missing_installer_input_path(raw_path, auto_analyze=auto_analyze)
+
+    def paste_missing_installer_path(self):
+        try:
+            raw_path = self.root.clipboard_get()
+        except tk.TclError:
+            self.view.append_missing_installer_log("剪贴板中没有可用路径。")
+            return
+
+        self.view.set_missing_installer_quick_path(raw_path)
+        self._add_missing_installer_input_path(raw_path, auto_analyze=True)
+
+    def browse_missing_installer_workflow_files(self):
+        file_paths = filedialog.askopenfilenames(
+            title="选择工作流 JSON 文件",
+            filetypes=[("JSON文件", "*.json"), ("所有文件", "*.*")],
+        )
+        if not file_paths:
+            return
+
+        existing_count = len(self._missing_installer_selected_paths)
+        selected_paths = list(dict.fromkeys(self._missing_installer_selected_paths + list(file_paths)))
+        self._set_missing_installer_paths(selected_paths)
+        self.view.append_missing_installer_log(f"已选择 {len(file_paths)} 个工作流文件。")
+        if existing_count == 0 and len(file_paths) == 1:
+            self.view.append_missing_installer_log("已自动开始分析单个工作流。")
+            self.analyze_missing_installer_workflows()
+
+    def browse_missing_installer_workflow_folder(self):
+        directory = filedialog.askdirectory(title="选择工作流目录")
+        if not directory:
+            return
+
+        existing_count = len(self._missing_installer_selected_paths)
+        selected_paths = list(dict.fromkeys(self._missing_installer_selected_paths + [directory]))
+        self._set_missing_installer_paths(selected_paths)
+        self.view.append_missing_installer_log(f"已添加工作流目录: {directory}")
+        if existing_count == 0:
+            self.view.append_missing_installer_log("已自动开始分析当前目录。")
+            self.analyze_missing_installer_workflows()
+
+    def clear_missing_installer_workflow_inputs(self):
+        self._set_missing_installer_paths([])
+        self.view.append_missing_installer_log("已清空待分析的工作流。")
+
+    def go_to_missing_installer_step(self, step_index):
+        if step_index == self._missing_installer_step:
+            return
+        if step_index not in self._missing_installer_completed_steps:
+            return
+
+        self._missing_installer_step = step_index
+        self._sync_missing_node_installer_view()
+
+    def analyze_missing_installer_workflows(self):
+        if not self._missing_installer_selected_paths:
+            self.update_status("请先选择工作流")
+            self.view.append_missing_installer_log("请先选择一个或多个工作流 JSON 文件。")
+            return
+
+        runtime_status = self.refresh_missing_node_installer_runtime()
+        if not runtime_status["comfyui_ready"] or not runtime_status["manager_ready"]:
+            was_pending = self._pending_missing_analysis
+            self._pending_missing_analysis = True
+            self._pending_runtime_wait_deadline = time.monotonic() + 60.0
+            self.update_status("正在启动 ComfyUI 并等待 Manager 就绪")
+            if not self._missing_runtime_wait_logged:
+                self.view.append_missing_installer_log("ComfyUI 或 Manager 尚未就绪，正在尝试启动后继续分析。")
+                self._missing_runtime_wait_logged = True
+            if runtime_status["comfyui_ready"] and not runtime_status["manager_ready"]:
+                self._schedule_manager_runtime_check(force=True)
+            elif not self.comfyui_launcher_service.is_running() and not self.comfyui_launcher_service.is_service_port_open():
+                if not was_pending:
+                    self.start_comfyui_for_missing_installer()
+            return
+
+        result = self.missing_node_install_orchestrator.prepare_install_plan(self._missing_installer_selected_paths)
+        if not result.success:
+            self.update_status("缺失节点分析失败")
+            self.view.append_missing_installer_log(result.message)
+            return
+
+        self._pending_missing_analysis = False
+        self._pending_runtime_wait_deadline = 0.0
+        self._missing_runtime_wait_logged = False
+        self._missing_installer_analysis_result = result.data["analysis"]
+        self._missing_installer_install_plan = result.data["install_plan"]
+        self._missing_installer_preflight_result = None
+        self._missing_installer_manual_items = result.data["manual_items"]
+        self._missing_installer_recheck_paths = list(result.data["workflow_files"])
+        self._missing_installer_completed_steps = {0}
+        self._missing_installer_step = 1
+        self._missing_installer_restart_available = False
+
+        self._sync_missing_node_installer_view()
+        self.update_status("缺失节点分析完成")
+        self.view.append_missing_installer_log(
+            f"分析完成：{result.data['analysis']['total_workflows']} 个工作流，"
+            f"{result.data['analysis']['missing_count']} 个缺失节点，"
+            f"{self._count_missing_installer_actionable_items()} 个可执行候选项。"
+        )
+
+    def advance_missing_installer_to_selection(self):
+        if self._missing_installer_analysis_result is None:
+            self.view.append_missing_installer_log("请先完成缺失节点分析。")
+            return
+
+        self._missing_installer_completed_steps = {0, 1}
+        self._missing_installer_step = 2
+        self._sync_missing_node_installer_view()
+
+    def run_missing_installer_dependency_preflight(self):
+        if not self._missing_installer_install_plan:
+            self.view.append_missing_installer_log("当前没有可预检的插件包。")
+            return
+
+        result = self.dependency_preflight_service.evaluate(self._missing_installer_install_plan)
+        if not result.success:
+            self.update_status("依赖预检失败")
+            self.view.append_missing_installer_log(result.message)
+            return
+
+        self._missing_installer_preflight_result = result.data
+        blocked_ids = set(result.data.get("blocked_package_ids", []))
+        preflight_rows = {item["id"]: item for item in result.data.get("rows", [])}
+
+        for item in self._missing_installer_install_plan:
+            preflight_row = preflight_rows.get(item["id"], {})
+            item["preflight_strategy"] = preflight_row.get("strategy", "install")
+            item["preflight_risk_level"] = preflight_row.get("risk_level", "低")
+            item["preflight_conclusion"] = preflight_row.get("conclusion", "safe")
+            item["preflight_conclusion_label"] = preflight_row.get("conclusion_label", "可直接安装")
+            item["preflight_reasons"] = list(preflight_row.get("reasons") or [])
+            if item["id"] in blocked_ids:
+                item["selected"] = False
+                item["status"] = "阻断安装"
+
+        self._missing_installer_completed_steps = {0, 1, 2}
+        self._missing_installer_step = 3
+        self._sync_missing_node_installer_view()
+        self.update_status("依赖预检完成")
+        for line in result.data.get("logs", []):
+            self.view.append_missing_installer_log(line)
+
+    def toggle_missing_installer_package_selection(self):
+        package_id = self.view.get_selected_missing_installer_package_id()
+        if not package_id:
+            return
+
+        for item in self._missing_installer_install_plan:
+            if item["id"] == package_id:
+                if not item.get("selectable", False):
+                    return
+                item["selected"] = not item.get("selected", True)
+                break
+
+        self._sync_missing_node_installer_view()
+
+    def start_missing_installer_installation(self, *, safe_only=False, ignore_preflight=False):
+        if not self._missing_installer_install_plan:
+            self.view.append_missing_installer_log("当前没有可安装的插件包。")
+            return
+
+        if safe_only and not self._missing_installer_preflight_result:
+            self.view.append_missing_installer_log("仅安装安全项需要先完成依赖预检。")
+            return
+
+        selected_packages = [
+            item
+            for item in self._missing_installer_install_plan
+            if item.get("selected", True) and item.get("queue_action")
+        ]
+        if not selected_packages:
+            self.view.append_missing_installer_log("请至少保留一个可执行的候选项。")
+            return
+
+        if self._missing_installer_preflight_result and not ignore_preflight:
+            execution_plan_result = self.dependency_install_planner.build_execution_plan(
+                selected_packages,
+                self._missing_installer_preflight_result,
+                safe_only=safe_only,
+            )
+            for blocked in execution_plan_result.data.get("blocked_packages", []) if execution_plan_result.data else []:
+                self.view.append_missing_installer_log(
+                    f"{blocked['title']} 被依赖预检拦截：{'；'.join(blocked.get('reasons') or [])}"
+                )
+            for skipped in execution_plan_result.data.get("skipped_packages", []) if execution_plan_result.data else []:
+                self.view.append_missing_installer_log(f"{skipped['title']} 已从“仅安装安全项”中跳过。")
+            if not execution_plan_result.success:
+                self.update_status("依赖预检阻断安装")
+                self.view.append_missing_installer_log(execution_plan_result.message)
+                self._sync_missing_node_installer_view()
+                return
+
+            executable_packages = execution_plan_result.data.get("executable_packages", [])
+        else:
+            executable_packages = list(selected_packages)
+            self.view.append_missing_installer_log("已跳过依赖预检，直接交给 ComfyUI-Manager 安装。")
+
+        self._missing_installer_completed_steps = {0, 1, 2, 3}
+        self._missing_installer_step = 4
+
+        selected_ids = {item["id"] for item in executable_packages}
+        self._update_missing_installer_package_status(selected_ids, "已排队")
+        result = self.missing_node_install_orchestrator.execute_install_plan(executable_packages)
+
+        for failed in result.data.get("failed_packages", []) if result.data else []:
+            self._update_missing_installer_package_status({failed["id"]}, "失败")
+            self.view.append_missing_installer_log(f"{failed['title']} 入队失败：{failed['message']}")
+
+        if not result.success:
+            self.update_status("批量安装入队失败")
+            self.view.append_missing_installer_log(result.message)
+            self._sync_missing_node_installer_view()
+            return
+
+        self._missing_installer_restart_available = False
+        self._sync_missing_node_installer_view()
+        self.update_status("缺失节点安装已提交")
+        self.view.append_missing_installer_log(result.message)
+        self.view.set_missing_installer_queue_progress("安装队列处理中...")
+        self._schedule_manager_queue_poll()
+
+    def restart_comfyui_and_recheck_missing_nodes(self):
+        if not self._missing_installer_recheck_paths:
+            self.view.append_missing_installer_log("没有可复检的工作流。")
+            return
+
+        self._pending_missing_recheck = True
+        self._pending_runtime_wait_deadline = time.monotonic() + 60.0
+        self._missing_runtime_wait_logged = False
+        self._missing_installer_restart_available = False
+        self.view.set_missing_installer_restart_button_visible(False)
+        self.view.append_missing_installer_log("正在重启 ComfyUI，重启完成后将自动复检。")
+        self.update_status("正在重启 ComfyUI")
+        self.stop_comfyui()
+        self._start_comfyui_with_mode(self._missing_installer_launch_mode)
+
+    def refresh_missing_node_installer_runtime(self, snapshot=None):
+        runtime_data = snapshot or self.comfyui_launcher_service.get_runtime_snapshot().data
+        comfyui_state = runtime_data.get("state", "idle")
+        port_open = self.comfyui_launcher_service.is_service_port_open()
+        waiting_runtime = self._is_waiting_for_runtime()
+        comfyui_label = self._map_comfyui_runtime_state(comfyui_state)
+        manager_label = "未启动"
+        manager_ready = False
+
+        comfyui_ready = port_open or comfyui_state == "running"
+        if port_open and comfyui_state != "running":
+            comfyui_label = "运行中"
+        elif waiting_runtime and not port_open:
+            comfyui_label = "启动中"
+
+        if port_open:
+            manager_label = self._manager_runtime_status_label
+            manager_ready = self._manager_runtime_ready
+            self._schedule_manager_runtime_check()
+        else:
+            self._manager_runtime_status_label = "未启动"
+            self._manager_runtime_ready = False
+            self._manager_runtime_check_inflight = False
+            self._manager_runtime_last_check = 0.0
+
+        self.view.set_missing_installer_runtime_status(
+            comfyui_status=comfyui_label,
+            manager_status=manager_label,
+            start_enabled=not comfyui_ready and not waiting_runtime,
+        )
+        return {"comfyui_ready": comfyui_ready, "manager_ready": manager_ready}
+
+    def start_comfyui_for_missing_installer(self):
+        self._pending_missing_analysis = True
+        self._pending_runtime_wait_deadline = time.monotonic() + 60.0
+        self._missing_runtime_wait_logged = False
+        self.view.append_missing_installer_log("正在以完整模式启动 ComfyUI，以便按 Manager 的缺失语义进行分析。")
+        self._start_comfyui_with_mode(self._missing_installer_launch_mode)
+
+    def _sync_missing_node_installer_view(self):
+        self.view.set_missing_installer_steps(
+            current_step=self._missing_installer_step,
+            completed_steps=self._missing_installer_completed_steps,
+        )
+        self.view.show_missing_installer_step(self._missing_installer_step)
+        self.view.set_missing_installer_selected_paths(self._missing_installer_selected_paths)
+        self.view.set_missing_installer_analysis_summary(self._build_missing_installer_summary())
+        self.view.load_missing_installer_packages(self._missing_installer_install_plan)
+        self.view.set_missing_installer_preflight_summary(self._build_missing_installer_preflight_summary())
+        self.view.load_missing_installer_preflight_rows(
+            (self._missing_installer_preflight_result or {}).get("rows", [])
+        )
+        self.view.set_missing_installer_preflight_actions(
+            can_install=bool(self._missing_installer_install_plan) and bool(self._missing_installer_preflight_result),
+            safe_only_enabled=bool(
+                self._missing_installer_preflight_result
+                and any(
+                    item.get("conclusion") in {"safe", "safe_with_policy"}
+                    for item in self._missing_installer_preflight_result.get("rows", [])
+                )
+            ),
+            blocked_count=len((self._missing_installer_preflight_result or {}).get("blocked_package_ids", [])),
+        )
+        self.view.load_missing_installer_manual_items(self._missing_installer_manual_items)
+        self.view.load_missing_installer_install_rows(self._missing_installer_install_plan)
+        self.view.set_missing_installer_restart_button_visible(self._missing_installer_restart_available)
+
+    def _build_missing_installer_summary(self):
+        analysis = self._missing_installer_analysis_result or {}
+        return {
+            "total_workflows": analysis.get("total_workflows", 0),
+            "total_node_types": analysis.get("total_node_types", 0),
+            "missing_count": analysis.get("missing_count", 0),
+            "installable_count": self._count_missing_installer_actionable_items(),
+            "manual_count": len(self._missing_installer_manual_items),
+        }
+
+    def _build_missing_installer_preflight_summary(self):
+        summary = (self._missing_installer_preflight_result or {}).get("summary", {})
+        return {
+            "safe": summary.get("safe", 0),
+            "safe_with_policy": summary.get("safe_with_policy", 0),
+            "warning": summary.get("warning", 0),
+            "blocked": summary.get("blocked", 0),
+        }
+
+    def _count_missing_installer_actionable_items(self):
+        return sum(1 for item in self._missing_installer_install_plan if item.get("queue_action"))
+
+    def _set_missing_installer_paths(self, paths):
+        self._missing_installer_selected_paths = list(paths or [])
+        self._missing_installer_analysis_result = None
+        self._missing_installer_install_plan = []
+        self._missing_installer_preflight_result = None
+        self._missing_installer_manual_items = []
+        self._missing_installer_recheck_paths = []
+        self._missing_installer_restart_available = False
+        self._missing_installer_completed_steps = set()
+        self._missing_installer_step = 0
+        self._sync_missing_node_installer_view()
+
+    def _add_missing_installer_input_path(self, raw_path, *, auto_analyze=False):
+        path = os.path.abspath((raw_path or "").strip().strip('"'))
+        if not path:
+            self.view.append_missing_installer_log("请输入或粘贴工作流文件/目录路径。")
+            return
+
+        if not os.path.exists(path):
+            self.view.append_missing_installer_log(f"路径不存在: {path}")
+            return
+
+        if not os.path.isdir(path) and not path.lower().endswith(".json"):
+            self.view.append_missing_installer_log("只支持 JSON 工作流文件或目录路径。")
+            return
+
+        selected_paths = list(dict.fromkeys(self._missing_installer_selected_paths + [path]))
+        if selected_paths == self._missing_installer_selected_paths:
+            self.view.append_missing_installer_log(f"已存在路径: {path}")
+        else:
+            self._set_missing_installer_paths(selected_paths)
+            if os.path.isdir(path):
+                self.view.append_missing_installer_log(f"已添加工作流目录: {path}")
+            else:
+                self.view.append_missing_installer_log(f"已添加工作流文件: {os.path.basename(path)}")
+
+        if auto_analyze and len(selected_paths) == 1:
+            self.view.append_missing_installer_log("已自动开始分析单个输入。")
+            self.analyze_missing_installer_workflows()
+
+    def _update_missing_installer_package_status(self, package_ids, status):
+        for item in self._missing_installer_install_plan:
+            if item["id"] in package_ids:
+                item["status"] = status
+
+    def _schedule_manager_queue_poll(self):
+        if self._manager_queue_poll_scheduled:
+            return
+        self._manager_queue_poll_scheduled = True
+        self.root.after(500, self._poll_manager_queue)
+
+    def _poll_manager_queue(self):
+        self._manager_queue_poll_scheduled = False
+        result = self.comfyui_manager_api_service.get_queue_status()
+        if not result.success:
+            self.view.append_missing_installer_log(result.message)
+            return
+
+        status = result.data
+        total_count = status.get("total_count", 0)
+        done_count = status.get("done_count", 0)
+        is_processing = status.get("is_processing", False)
+        in_progress_count = status.get("in_progress_count", 0)
+
+        if in_progress_count > 0:
+            queued_ids = {
+                item["id"]
+                for item in self._missing_installer_install_plan
+                if item.get("status") in {"已排队", "待安装", "待修复"}
+            }
+            self._update_missing_installer_package_status(queued_ids, "安装中")
+
+        self.view.set_missing_installer_queue_progress(f"安装队列进度：{done_count}/{total_count}")
+        self._sync_missing_node_installer_view()
+
+        if is_processing:
+            self._schedule_manager_queue_poll()
+            return
+
+        finished_ids = {
+            item["id"]
+            for item in self._missing_installer_install_plan
+            if item.get("status") in {"已排队", "安装中"}
+        }
+        if finished_ids:
+            self._update_missing_installer_package_status(finished_ids, "需重启生效")
+            self._missing_installer_restart_available = True
+            self.view.append_missing_installer_log("安装队列已完成，请重启 ComfyUI 后复检。")
+            self._sync_missing_node_installer_view()
+
+    def _run_missing_node_recheck(self):
+        result = self.missing_node_install_orchestrator.recheck_after_restart(self._missing_installer_recheck_paths)
+        if not result.success:
+            self.view.append_missing_installer_log(result.message)
+            self.update_status("复检失败")
+            return
+
+        self._pending_missing_recheck = False
+        self._pending_runtime_wait_deadline = 0.0
+        self._missing_runtime_wait_logged = False
+        self._missing_installer_analysis_result = result.data["analysis"]
+        self._missing_installer_install_plan = result.data["install_plan"]
+        self._missing_installer_preflight_result = None
+        self._missing_installer_manual_items = result.data["manual_items"]
+        self._missing_installer_completed_steps = {0, 1, 2, 3, 4}
+        self._missing_installer_step = 4
+        self._missing_installer_restart_available = False
+        self._sync_missing_node_installer_view()
+
+        if not self._missing_installer_analysis_result.get("missing_count") and not self._missing_installer_manual_items:
+            self.view.append_missing_installer_log("复检完成，缺失节点已全部解决。")
+            self.update_status("缺失节点已解决")
+        else:
+            self.view.append_missing_installer_log("复检完成，仍有部分节点需要继续处理。")
+            self.update_status("复检完成")
+
+    def refresh_comfyui_launch_runtime(self, snapshot=None):
+        runtime_data = snapshot or self.comfyui_launcher_service.get_runtime_snapshot().data
+        state = runtime_data.get("state", "idle")
+        state_label = self._map_comfyui_runtime_state(state)
+        pid = runtime_data.get("pid") or ""
+        command = runtime_data.get("command") or []
+        command_text = " ".join(command) if isinstance(command, (list, tuple)) else str(command or "")
+
+        self.view.set_comfyui_launch_status(state_label)
+        self.view.set_comfyui_launch_details(pid=pid, command=command_text)
+        self.view.set_comfyui_launch_button_states(
+            start_enabled=state not in {"running"},
+            stop_enabled=state in {"running"},
+        )
+        if state == "running" and self._last_comfyui_runtime_state != "running":
+            self.update_status("ComfyUI 运行中")
+
+        if state != self._last_comfyui_runtime_state:
+            if state == "stopped" and self._last_comfyui_runtime_state == "running":
+                self.view.append_comfyui_launch_log("ComfyUI 已停止。")
+                self.update_status("ComfyUI 已停止")
+            elif state == "failed":
+                exit_code = runtime_data.get("exit_code")
+                self.view.append_comfyui_launch_log(f"ComfyUI 已退出，退出码: {exit_code}")
+                self.update_status("ComfyUI 启动失败")
+            self._last_comfyui_runtime_state = state
+
+        self.refresh_missing_node_installer_runtime(snapshot=runtime_data)
+
+    def _schedule_comfyui_runtime_poll(self):
+        if self._comfyui_runtime_poll_scheduled:
+            return
+        self._comfyui_runtime_poll_scheduled = True
+        self.root.after(self._get_comfyui_runtime_poll_delay(), self._poll_comfyui_runtime)
+
+    def _poll_comfyui_runtime(self):
+        if self._is_shutting_down:
+            self._comfyui_runtime_poll_scheduled = False
+            return
+        self._comfyui_runtime_poll_scheduled = False
+        deferred_missing_installer_lines = []
+        for line in self.comfyui_launcher_service.drain_output():
+            self.view.append_comfyui_launch_log(line)
+            classification = self._classify_missing_installer_log_line(line)
+            if classification == "priority":
+                self.view.append_missing_installer_log(line)
+            elif classification == "normal":
+                deferred_missing_installer_lines.append(line)
+
+        for line in deferred_missing_installer_lines:
+            self.view.append_missing_installer_log(line)
+
+        snapshot = self.comfyui_launcher_service.get_runtime_snapshot().data
+        self.refresh_comfyui_launch_runtime(snapshot=snapshot)
+        self._maybe_open_comfyui_browser(snapshot)
+        runtime_status = {
+            "comfyui_ready": self.comfyui_launcher_service.is_service_port_open() or snapshot.get("state") == "running",
+            "manager_ready": self._manager_runtime_ready,
+        }
+
+        if runtime_status["manager_ready"]:
+            if self._pending_missing_analysis:
+                self._pending_missing_analysis = False
+                self.root.after(0, self.analyze_missing_installer_workflows)
+            elif self._pending_missing_recheck:
+                self._pending_missing_recheck = False
+                self.root.after(0, self._run_missing_node_recheck)
+
+        if snapshot.get("state") == "running" or self._is_waiting_for_runtime() or self.comfyui_launcher_service.is_service_port_open():
+            self._schedule_comfyui_runtime_poll()
+        elif self._pending_runtime_wait_deadline and time.monotonic() >= self._pending_runtime_wait_deadline:
+            self._clear_pending_runtime_wait("等待 ComfyUI/Manager 重启超时，请手动重试。")
+
+    def _get_comfyui_runtime_poll_delay(self):
+        if self._is_waiting_for_runtime():
+            return 250
+        return 100 if self._is_missing_installer_install_active() else 250
+
+    def _is_waiting_for_runtime(self):
+        if not (self._pending_missing_analysis or self._pending_missing_recheck):
+            return False
+        if not self._pending_runtime_wait_deadline:
+            return False
+        return time.monotonic() < self._pending_runtime_wait_deadline
+
+    def _clear_pending_runtime_wait(self, log_message=""):
+        self._pending_runtime_wait_deadline = 0.0
+        self._pending_missing_analysis = False
+        self._pending_missing_recheck = False
+        self._missing_runtime_wait_logged = False
+        if log_message:
+            self.view.append_missing_installer_log(log_message)
+            self.update_status("ComfyUI/Manager 未就绪")
+
+    def _schedule_manager_runtime_check(self, force=False):
+        if self._is_shutting_down:
+            return
+
+        now = time.monotonic()
+        if self._manager_runtime_check_inflight:
+            return
+        if not force and self._manager_runtime_last_check and now - self._manager_runtime_last_check < 1.5:
+            return
+
+        self._manager_runtime_check_inflight = True
+        self._manager_runtime_last_check = now
+        self._manager_runtime_status_label = "检测中"
+        threading.Thread(target=self._run_manager_runtime_check, daemon=True).start()
+
+    def _run_manager_runtime_check(self):
+        result = self.comfyui_manager_api_service.get_version()
+        self.root.after(0, self._apply_manager_runtime_check_result, result)
+
+    def _apply_manager_runtime_check_result(self, result):
+        self._manager_runtime_check_inflight = False
+        if self._is_shutting_down:
+            return
+
+        if result.success:
+            self._manager_runtime_status_label = "可用"
+            self._manager_runtime_ready = True
+        else:
+            self._manager_runtime_status_label = "不可用"
+            self._manager_runtime_ready = False
+
+        runtime_status = self.refresh_missing_node_installer_runtime()
+        if runtime_status["manager_ready"]:
+            self._pending_runtime_wait_deadline = 0.0
+            self._missing_runtime_wait_logged = False
+            if self._pending_missing_analysis:
+                self._pending_missing_analysis = False
+                self.root.after(0, self.analyze_missing_installer_workflows)
+            elif self._pending_missing_recheck:
+                self._pending_missing_recheck = False
+                self.root.after(0, self._run_missing_node_recheck)
+
+    def _is_missing_installer_install_active(self):
+        if self._missing_installer_step != 4 or self._missing_installer_restart_available:
+            return False
+
+        active_statuses = {"已排队", "安装中"}
+        return any(
+            item.get("status") in active_statuses
+            for item in self._missing_installer_install_plan
+        )
+
+    @staticmethod
+    def _map_comfyui_runtime_state(state):
+        state_map = {
+            "idle": "未启动",
+            "running": "运行中",
+            "stopped": "已停止",
+            "failed": "启动失败",
+        }
+        return state_map.get(state, "未启动")
+
+    def _maybe_open_comfyui_browser(self, snapshot):
+        if self._comfyui_browser_opened or self._is_shutting_down:
+            return
+        if snapshot.get("state") != "running":
+            return
+        if not self.comfyui_launcher_service.is_service_port_open():
+            return
+
+        launch_url = snapshot.get("url") or self.comfyui_launcher_service.get_launch_url()
+        threading.Thread(target=webbrowser.open, args=(launch_url,), daemon=True).start()
+        self._comfyui_browser_opened = True
+        self.view.append_comfyui_launch_log(f"已打开浏览器: {launch_url}")
+
+    def shutdown(self):
+        if self._is_shutting_down:
+            return
+        self._is_shutting_down = True
+        self._pending_missing_analysis = False
+        self._pending_missing_recheck = False
+        try:
+            self.comfyui_launcher_service.shutdown()
+        except Exception:
+            logger.exception("Error while shutting down ComfyUI launcher service.")
+
+    @staticmethod
+    def _classify_missing_installer_log_line(line):
+        normalized = (line or "").strip().lower()
+        if not normalized:
+            return "ignore"
+
+        if "fetch comfyregistry data:" in normalized:
+            return "ignore"
+
+        if "default cache updated:" in normalized:
+            return "ignore"
+
+        # tqdm-style progress lines are high-frequency and do not help confirm
+        # whether git clone/install actually succeeded.
+        if "%|" in normalized and "git clone" not in normalized:
+            return "ignore"
+
+        priority_keywords = (
+            "git clone",
+            "installation was successful",
+            "installation failed",
+            "install: pip packages",
+            "install: install script",
+            "security",
+            "failed",
+            "error",
+            "traceback",
+        )
+        if any(keyword in normalized for keyword in priority_keywords):
+            return "priority"
+
+        keywords = (
+            "comfyui-manager",
+            "manager",
+            "install",
+            "reinstall",
+            "uninstall",
+            "git",
+            "clone",
+            "fetch",
+            "pull",
+            "pip",
+            "security",
+            "failed",
+            "error",
+            "traceback",
+        )
+        if any(keyword in normalized for keyword in keywords):
+            return "normal"
+
+        return "ignore"
 
     def cleanup_old_files(self):
         logger.info("Cleanup old files button clicked.")

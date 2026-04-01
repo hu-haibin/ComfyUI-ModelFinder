@@ -14,6 +14,7 @@ class SettingsModel:
         'auto_open_html': True,
         'chrome_path': '',
         'comfyui_path': '',
+        'comfyui_python_path': '',
         'random_theme': True,
         'theme': 'cosmo', # Default theme
         'retention_days': 30

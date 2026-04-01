@@ -14,18 +14,22 @@ class AppView:
         self.controller = None # Set later by set_controller
 
         self.notebook = None
-        self.tab_single = None
-        self.tab_batch = None
+        self.tab_workflow = None
         self.tab_settings = None
         self.tab_irregular_names = None # 新增：不规则名称标签页的引用
         self.tab_model_config = None # 新增：模型配置标签页的引用
 
         self.tab_plugin_repair = None # 插件修复标签页的引用
+        self.tab_comfyui_launch = None # ComfyUI 启动标签页的引用
+
+        self.tab_missing_installer = None
 
         self.workflow_path_var = tk.StringVar()
         self.workflow_dir_var = tk.StringVar()
+        self.workflow_mode_var = tk.StringVar(value="single")
         self.file_pattern_var = tk.StringVar(value="*.json;*")
         self.chrome_path_var = tk.StringVar()
+        self.comfyui_python_path_var = tk.StringVar()
         self.theme_var = tk.StringVar()
         self.retention_days_var = tk.IntVar(value=30) # Keep default for initial display
 
@@ -36,9 +40,14 @@ class AppView:
         self.batch_progress_label = None
         self.result_tree = None
         self.view_result_button = None
-        self.view_batch_html_button = None
+        self.workflow_start_button = None
         self.theme_dropdown = None
         self.status_label = None # Reference for status bar label
+        self.workflow_single_input_frame = None
+        self.workflow_batch_input_frame = None
+        self.workflow_single_content_frame = None
+        self.workflow_batch_content_frame = None
+        self._single_view_result_enabled = False
         # References for checkbuttons needed in _update_initial_settings
         self.auto_open_html_check = None
         self.auto_open_check = None # Checkbutton in batch tab
@@ -65,10 +74,51 @@ class AppView:
         self.repair_plugins_tree = None
         self.repair_button = None
         # -------------------------------------
+        self.comfyui_launch_status_var = tk.StringVar(value="未启动")
+        self.comfyui_launch_pid_var = tk.StringVar(value="")
+        self.comfyui_launch_command_var = tk.StringVar(value="")
+        self.comfyui_launch_auto_scroll_var = tk.BooleanVar(value=True)
+        self.comfyui_launch_log_text = None
+        self.comfyui_launch_start_button = None
+        self.comfyui_launch_stop_button = None
+
+        self.missing_installer_comfyui_status_var = tk.StringVar(value="未启动")
+        self.missing_installer_manager_status_var = tk.StringVar(value="未启动")
+        self.missing_installer_queue_progress_var = tk.StringVar(value="")
+        self.missing_installer_quick_path_var = tk.StringVar(value="")
+        self.missing_installer_summary_vars = {
+            "total_workflows": tk.StringVar(value="0"),
+            "total_node_types": tk.StringVar(value="0"),
+            "missing_count": tk.StringVar(value="0"),
+            "installable_count": tk.StringVar(value="0"),
+            "manual_count": tk.StringVar(value="0"),
+        }
+        self.missing_installer_preflight_summary_vars = {
+            "safe": tk.StringVar(value="0"),
+            "safe_with_policy": tk.StringVar(value="0"),
+            "warning": tk.StringVar(value="0"),
+            "blocked": tk.StringVar(value="0"),
+        }
+        self.missing_installer_step_buttons = []
+        self.missing_installer_step_frames = {}
+        self.missing_installer_selected_paths_listbox = None
+        self.missing_installer_package_tree = None
+        self.missing_installer_preflight_tree = None
+        self.missing_installer_install_tree = None
+        self.missing_installer_manual_listbox = None
+        self.missing_installer_log_text = None
+        self.missing_installer_start_button = None
+        self.missing_installer_preflight_install_button = None
+        self.missing_installer_preflight_safe_button = None
+        self.missing_installer_restart_button = None
 
         self._set_icon()
         self._create_main_widgets() # self.notebook 在这里创建
         self._setup_tabs()          # 所有标签页在这里添加和设置
+        if self.notebook and not self.tab_missing_installer:
+            self.tab_missing_installer = ttk.Frame(self.notebook, padding="10")
+            self.notebook.add(self.tab_missing_installer, text="缺失节点安装")
+            self._create_missing_installer_tab()
         logger.debug("AppView initialized.")
 
     def set_controller(self, controller):
@@ -125,14 +175,9 @@ class AppView:
         logger.debug("Setting up tabs.")
 
         # 单个处理标签页
-        self.tab_single = ttk.Frame(self.notebook, padding="10")
-        self.notebook.add(self.tab_single, text="单个处理")
-        self._setup_single_tab(self.tab_single)
-
-        # 批量处理标签页
-        self.tab_batch = ttk.Frame(self.notebook, padding="10")
-        self.notebook.add(self.tab_batch, text="批量处理")
-        self._setup_batch_tab(self.tab_batch)
+        self.tab_workflow = ttk.Frame(self.notebook, padding="10")
+        self.notebook.add(self.tab_workflow, text="工作流")
+        self._setup_workflow_tab(self.tab_workflow)
 
         # === 新增：创建不规则名称映射标签页 ===
         self.tab_irregular_names = ttk.Frame(self.notebook, padding="10")
@@ -150,6 +195,11 @@ class AppView:
         self.tab_plugin_repair = ttk.Frame(self.notebook, padding="10")
         self.notebook.add(self.tab_plugin_repair, text="插件修复")
         self._create_plugin_repair_tab()
+
+        # === 创建 ComfyUI 启动标签页 ===
+        self.tab_comfyui_launch = ttk.Frame(self.notebook, padding="10")
+        self.notebook.add(self.tab_comfyui_launch, text="启动 ComfyUI")
+        self._create_comfyui_launch_tab()
 
         # 设置标签页
         self.tab_settings = ttk.Frame(self.notebook, padding="10")
@@ -245,6 +295,164 @@ class AppView:
         main_frame.columnconfigure(1, weight=1)
         main_frame.rowconfigure(7, weight=1)
 
+
+    def _setup_workflow_tab(self, tab_frame):
+        """设置统一的工作流标签页内容。"""
+        main_frame = ttk.Frame(tab_frame, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        mode_frame = ttk.LabelFrame(main_frame, text="处理模式", padding=10)
+        mode_frame.pack(fill=tk.X, pady=(0, 10))
+        ttk.Radiobutton(
+            mode_frame,
+            text="单文件",
+            variable=self.workflow_mode_var,
+            value="single",
+            command=self._update_workflow_mode_ui,
+        ).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Radiobutton(
+            mode_frame,
+            text="目录",
+            variable=self.workflow_mode_var,
+            value="batch",
+            command=self._update_workflow_mode_ui,
+        ).pack(side=tk.LEFT)
+
+        input_frame = ttk.LabelFrame(main_frame, text="工作流输入", padding=10)
+        input_frame.pack(fill=tk.X, pady=(0, 10))
+
+        self.workflow_single_input_frame = ttk.Frame(input_frame)
+        ttk.Label(self.workflow_single_input_frame, text="工作流文件:").pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Entry(self.workflow_single_input_frame, textvariable=self.workflow_path_var, width=60).pack(
+            side=tk.LEFT, fill=tk.X, expand=True, padx=5
+        )
+        ttk.Button(
+            self.workflow_single_input_frame,
+            text="浏览...",
+            command=lambda: self.controller.browse_workflow_input() if self.controller else None,
+        ).pack(side=tk.LEFT, padx=(5, 0))
+
+        self.workflow_batch_input_frame = ttk.Frame(input_frame)
+        dir_row = ttk.Frame(self.workflow_batch_input_frame)
+        dir_row.pack(fill=tk.X, pady=(0, 5))
+        ttk.Label(dir_row, text="工作流目录:").pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Entry(dir_row, textvariable=self.workflow_dir_var, width=60).pack(
+            side=tk.LEFT, fill=tk.X, expand=True, padx=5
+        )
+        ttk.Button(
+            dir_row,
+            text="浏览...",
+            command=lambda: self.controller.browse_workflow_input() if self.controller else None,
+        ).pack(side=tk.LEFT, padx=(5, 0))
+
+        pattern_row = ttk.Frame(self.workflow_batch_input_frame)
+        pattern_row.pack(fill=tk.X, pady=(0, 5))
+        ttk.Label(pattern_row, text="文件格式:").pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Entry(pattern_row, textvariable=self.file_pattern_var, width=20).pack(side=tk.LEFT, padx=5)
+
+        options_row = ttk.Frame(self.workflow_batch_input_frame)
+        options_row.pack(fill=tk.X)
+        self.auto_open_check = ttk.Checkbutton(options_row, text="自动打开结果")
+        self.auto_open_check.pack(side=tk.LEFT)
+
+        action_frame = ttk.Frame(main_frame)
+        action_frame.pack(fill=tk.X, pady=(0, 10))
+        self.workflow_start_button = ttk.Button(
+            action_frame,
+            text="开始分析并搜索",
+            style="success.TButton",
+            command=lambda: self.controller.start_workflow_processing() if self.controller else None,
+        )
+        self.workflow_start_button.pack(side=tk.LEFT, padx=(0, 5))
+        self.view_result_button = ttk.Button(
+            action_frame,
+            text="查看结果",
+            command=lambda: self.controller.view_workflow_result() if self.controller else None,
+            state=tk.DISABLED,
+        )
+        self.view_result_button.pack(side=tk.LEFT)
+
+        content_frame = ttk.Frame(main_frame)
+        content_frame.pack(fill=tk.BOTH, expand=True)
+
+        self.workflow_single_content_frame = ttk.Frame(content_frame)
+        progress_frame = ttk.Frame(self.workflow_single_content_frame)
+        progress_frame.pack(fill=tk.X, pady=(0, 10))
+        ttk.Label(progress_frame, text="进度:").pack(side=tk.LEFT, padx=(0, 5))
+        self.progress_bar = ttk.Progressbar(progress_frame, orient=tk.HORIZONTAL, length=100, mode='determinate')
+        self.progress_bar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.progress_label = ttk.Label(progress_frame, text="0%")
+        self.progress_label.pack(side=tk.LEFT, padx=5)
+
+        ttk.Separator(self.workflow_single_content_frame, orient="horizontal").pack(fill=tk.X, pady=(0, 10))
+        ttk.Label(self.workflow_single_content_frame, text="处理日志:").pack(anchor="w", pady=(0, 5))
+        log_frame = ttk.Frame(self.workflow_single_content_frame)
+        log_frame.pack(fill=tk.BOTH, expand=True)
+
+        self.log_text = tk.Text(log_frame, height=15, wrap=tk.WORD, relief="solid", borderwidth=1)
+        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.log_text.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.log_text.config(yscrollcommand=scrollbar.set, state=tk.DISABLED)
+
+        self.workflow_batch_content_frame = ttk.Frame(content_frame)
+        batch_progress_frame = ttk.Frame(self.workflow_batch_content_frame)
+        batch_progress_frame.pack(fill=tk.X, pady=(0, 10))
+        ttk.Label(batch_progress_frame, text="进度:").pack(side=tk.LEFT, padx=(0, 5))
+        self.batch_progress_bar = ttk.Progressbar(
+            batch_progress_frame, orient=tk.HORIZONTAL, length=100, mode='determinate'
+        )
+        self.batch_progress_bar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.batch_progress_label = ttk.Label(batch_progress_frame, text="0%")
+        self.batch_progress_label.pack(side=tk.LEFT, padx=5)
+
+        ttk.Label(self.workflow_batch_content_frame, text="处理结果:").pack(anchor="w", pady=(0, 5))
+        result_frame = ttk.Frame(self.workflow_batch_content_frame)
+        result_frame.pack(fill=tk.BOTH, expand=True)
+        columns = ("文件名", "缺失数量", "状态")
+        self.result_tree = ttk.Treeview(result_frame, columns=columns, show="headings", height=10)
+        for col_idx, col_name in enumerate(columns):
+            self.result_tree.heading(col_name, text=col_name)
+            width = 150 if col_idx < 2 else 100
+            self.result_tree.column(col_name, width=width, anchor="w")
+        self.result_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        batch_scrollbar = ttk.Scrollbar(result_frame, orient=tk.VERTICAL, command=self.result_tree.yview)
+        batch_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.result_tree.config(yscrollcommand=batch_scrollbar.set)
+
+        self._update_workflow_mode_ui()
+
+    def _update_workflow_mode_ui(self):
+        """根据当前模式切换工作流标签页的显示内容。"""
+        mode = self.get_workflow_mode()
+
+        if self.workflow_single_input_frame:
+            self.workflow_single_input_frame.pack_forget()
+        if self.workflow_batch_input_frame:
+            self.workflow_batch_input_frame.pack_forget()
+        if self.workflow_single_content_frame:
+            self.workflow_single_content_frame.pack_forget()
+        if self.workflow_batch_content_frame:
+            self.workflow_batch_content_frame.pack_forget()
+
+        if mode == "batch":
+            if self.workflow_batch_input_frame:
+                self.workflow_batch_input_frame.pack(fill=tk.X)
+            if self.workflow_batch_content_frame:
+                self.workflow_batch_content_frame.pack(fill=tk.BOTH, expand=True)
+        else:
+            if self.workflow_single_input_frame:
+                self.workflow_single_input_frame.pack(fill=tk.X)
+            if self.workflow_single_content_frame:
+                self.workflow_single_content_frame.pack(fill=tk.BOTH, expand=True)
+
+        if self.workflow_start_button:
+            button_text = "开始处理并搜索" if mode == "batch" else "开始分析并搜索"
+            self.workflow_start_button.config(text=button_text)
+
+        if self.view_result_button:
+            button_state = tk.NORMAL if mode == "batch" or self._single_view_result_enabled else tk.DISABLED
+            self.view_result_button.config(text="查看结果", state=button_state)
 
     def _setup_settings_tab(self, tab_frame):
         """设置"设置"标签页的内容。"""
@@ -480,16 +688,18 @@ class AppView:
             theme = self.controller.get_loaded_theme_preference()
             chrome = self.controller.get_loaded_chrome_path()
             comfyui = self.controller.get_loaded_comfyui_path()
+            comfyui_python = self.controller.get_loaded_comfyui_python_path()
             days = self.controller.get_loaded_retention_days()
             logger.debug(
                 f"Applying initial settings to view: Theme={theme}, Chrome='{chrome}', "
-                f"ComfyUI='{comfyui}', Days={days}"
+                f"ComfyUI='{comfyui}', ComfyUIPython='{comfyui_python}', Days={days}"
             )
 
             # Apply values to view widgets
             if theme and self.theme_dropdown: self.set_selected_theme(theme)
             self.set_chrome_path(chrome) # Assuming set_chrome_path updates the var
             self.set_comfyui_path(comfyui)
+            self.set_comfyui_python_path(comfyui_python)
             if self.retention_days_var : self.retention_days_var.set(days) # Directly set IntVar
         else:
              logger.warning("Controller not set in view during _update_initial_settings.")
@@ -538,6 +748,11 @@ class AppView:
     def get_workflow_dir(self): return self.workflow_dir_var.get().strip()
     def set_workflow_dir(self, path): self.workflow_dir_var.set(path)
 
+    def get_workflow_mode(self): return self.workflow_mode_var.get().strip() or "single"
+    def set_workflow_mode(self, mode):
+        self.workflow_mode_var.set(mode if mode in {"single", "batch"} else "single")
+        self._update_workflow_mode_ui()
+
     def get_file_pattern(self): return self.file_pattern_var.get().strip()
     # No setter for file_pattern_var as it's usually just read
 
@@ -559,7 +774,8 @@ class AppView:
     # No explicit set_retention_days(self, days) as it's handled by _update_initial_settings via var
 
     def enable_view_result_button(self, enable=True):
-        if self.view_result_button:
+        self._single_view_result_enabled = bool(enable)
+        if self.view_result_button and self.get_workflow_mode() == "single":
             self.view_result_button.config(state=tk.NORMAL if enable else tk.DISABLED)
 
     def set_progress(self, value, text):
@@ -789,6 +1005,406 @@ class AppView:
     # Legacy model mover / model registry UI has been isolated from AppView.
     # The active notebook only exposes fully supported production tabs.
 
+    def _create_comfyui_launch_tab(self):
+        """创建 ComfyUI 启动标签页的内容"""
+        logger.debug("Creating ComfyUI launch tab.")
+
+        main_frame = ttk.Frame(self.tab_comfyui_launch, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        header_frame = ttk.Frame(main_frame)
+        header_frame.pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(header_frame, text="ComfyUI 启动", font=("Segoe UI", 13, "bold")).pack(side=tk.LEFT)
+        ttk.Label(
+            header_frame,
+            textvariable=self.comfyui_launch_status_var,
+            bootstyle="info",
+            font=("Segoe UI", 10, "bold"),
+        ).pack(side=tk.RIGHT)
+
+        path_frame = ttk.Frame(main_frame)
+        path_frame.pack(fill=tk.X, pady=(0, 8))
+
+        comfyui_row = ttk.Frame(path_frame)
+        comfyui_row.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(comfyui_row, text="ComfyUI", width=10).pack(side=tk.LEFT)
+        ttk.Entry(comfyui_row, textvariable=self.comfyui_path_var).pack(
+            side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8)
+        )
+        ttk.Button(
+            comfyui_row,
+            text="浏览",
+            width=8,
+            command=lambda: self.controller.browse_comfyui_launch_path() if self.controller else None,
+        ).pack(side=tk.LEFT)
+
+        python_row = ttk.Frame(path_frame)
+        python_row.pack(fill=tk.X)
+        ttk.Label(python_row, text="Python", width=10).pack(side=tk.LEFT)
+        ttk.Entry(python_row, textvariable=self.comfyui_python_path_var).pack(
+            side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8)
+        )
+        ttk.Button(
+            python_row,
+            text="浏览",
+            width=8,
+            command=lambda: self.controller.browse_comfyui_python_path() if self.controller else None,
+        ).pack(side=tk.LEFT)
+
+        action_frame = ttk.Frame(main_frame)
+        action_frame.pack(fill=tk.X, pady=(0, 8))
+        self.comfyui_launch_start_button = ttk.Button(
+            action_frame,
+            text="启动 ComfyUI",
+            style="success.TButton",
+            command=lambda: self.controller.start_comfyui() if self.controller else None,
+        )
+        self.comfyui_launch_start_button.pack(side=tk.LEFT, padx=(0, 6))
+        self.comfyui_launch_stop_button = ttk.Button(
+            action_frame,
+            text="停止",
+            style="danger.TButton",
+            command=lambda: self.controller.stop_comfyui() if self.controller else None,
+            state=tk.DISABLED,
+        )
+        self.comfyui_launch_stop_button.pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Button(
+            action_frame,
+            text="保存配置",
+            command=lambda: self.controller.save_comfyui_launch_settings() if self.controller else None,
+        ).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(
+            action_frame,
+            text="校验路径",
+            command=lambda: self.controller.validate_comfyui_launch_paths() if self.controller else None,
+        ).pack(side=tk.LEFT)
+
+        runtime_frame = ttk.Frame(main_frame)
+        runtime_frame.pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(runtime_frame, text="PID", width=10, bootstyle="secondary").grid(row=0, column=0, sticky="w")
+        ttk.Label(runtime_frame, textvariable=self.comfyui_launch_pid_var).grid(row=0, column=1, sticky="w")
+        ttk.Label(runtime_frame, text="命令", width=10, bootstyle="secondary").grid(row=1, column=0, sticky="nw", pady=(4, 0))
+        ttk.Label(
+            runtime_frame,
+            textvariable=self.comfyui_launch_command_var,
+            justify=tk.LEFT,
+            wraplength=720,
+            foreground="#667085",
+        ).grid(row=1, column=1, sticky="w", pady=(4, 0))
+        runtime_frame.columnconfigure(1, weight=1)
+
+        log_frame = ttk.Frame(main_frame)
+        log_frame.pack(fill=tk.BOTH, expand=True)
+
+        log_actions = ttk.Frame(log_frame)
+        log_actions.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(log_actions, text="启动日志", font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Button(
+            log_actions,
+            text="清空日志",
+            command=lambda: self.controller.clear_comfyui_launch_log() if self.controller else None,
+        ).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Checkbutton(
+            log_actions,
+            text="自动滚动",
+            variable=self.comfyui_launch_auto_scroll_var,
+        ).pack(side=tk.LEFT)
+
+        log_content_frame = ttk.Frame(log_frame)
+        log_content_frame.pack(fill=tk.BOTH, expand=True)
+        self.comfyui_launch_log_text = tk.Text(
+            log_content_frame,
+            height=15,
+            wrap=tk.WORD,
+            relief="solid",
+            borderwidth=1,
+        )
+        self.comfyui_launch_log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar = ttk.Scrollbar(log_content_frame, orient=tk.VERTICAL, command=self.comfyui_launch_log_text.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.comfyui_launch_log_text.config(yscrollcommand=scrollbar.set, state=tk.DISABLED)
+
+    def _create_missing_installer_tab(self):
+        logger.debug("Creating missing installer tab.")
+
+        main_frame = ttk.Frame(self.tab_missing_installer, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        header_frame = ttk.Frame(main_frame)
+        header_frame.pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(header_frame, text="缺失节点安装", font=("Segoe UI", 13, "bold")).pack(side=tk.LEFT)
+
+        status_frame = ttk.Frame(header_frame)
+        status_frame.pack(side=tk.RIGHT)
+        ttk.Label(status_frame, text="ComfyUI", bootstyle="secondary").pack(side=tk.LEFT, padx=(0, 4))
+        ttk.Label(status_frame, textvariable=self.missing_installer_comfyui_status_var, bootstyle="info").pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Label(status_frame, text="Manager", bootstyle="secondary").pack(side=tk.LEFT, padx=(0, 4))
+        ttk.Label(status_frame, textvariable=self.missing_installer_manager_status_var, bootstyle="info").pack(side=tk.LEFT, padx=(0, 12))
+        self.missing_installer_start_button = ttk.Button(
+            status_frame,
+            text="启动 ComfyUI",
+            bootstyle="success",
+            command=lambda: self.controller.start_comfyui_for_missing_installer() if self.controller else None,
+        )
+        self.missing_installer_start_button.pack(side=tk.LEFT)
+
+        steps_frame = ttk.Frame(main_frame)
+        steps_frame.pack(fill=tk.X, pady=(0, 10))
+        self.missing_installer_step_buttons = []
+        for index, title in enumerate(["上传工作流", "分析缺失节点", "选择插件", "预检依赖", "下载安装"]):
+            button = ttk.Button(
+                steps_frame,
+                text=f"{index + 1}. {title}",
+                bootstyle="secondary",
+                state=tk.DISABLED,
+                command=lambda value=index: self.controller.go_to_missing_installer_step(value) if self.controller else None,
+            )
+            button.pack(side=tk.LEFT, padx=(0, 6))
+            self.missing_installer_step_buttons.append(button)
+
+        content_frame = ttk.Frame(main_frame)
+        content_frame.pack(fill=tk.BOTH, expand=True)
+
+        upload_frame = ttk.Frame(content_frame)
+        analysis_frame = ttk.Frame(content_frame)
+        select_frame = ttk.Frame(content_frame)
+        preflight_frame = ttk.Frame(content_frame)
+        install_frame = ttk.Frame(content_frame)
+        self.missing_installer_step_frames = {
+            0: upload_frame,
+            1: analysis_frame,
+            2: select_frame,
+            3: preflight_frame,
+            4: install_frame,
+        }
+
+        quick_input_frame = ttk.Frame(upload_frame)
+        quick_input_frame.pack(fill=tk.X, pady=(0, 8))
+        quick_path_entry = ttk.Entry(
+            quick_input_frame,
+            textvariable=self.missing_installer_quick_path_var,
+        )
+        quick_path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6))
+        quick_path_entry.bind(
+            "<Return>",
+            lambda event: self.controller.add_missing_installer_quick_path(auto_analyze=True) if self.controller else None,
+        )
+        ttk.Button(
+            quick_input_frame,
+            text="添加路径",
+            command=lambda: self.controller.add_missing_installer_quick_path() if self.controller else None,
+        ).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(
+            quick_input_frame,
+            text="粘贴",
+            command=lambda: self.controller.paste_missing_installer_path() if self.controller else None,
+        ).pack(side=tk.LEFT)
+
+        ttk.Label(
+            upload_frame,
+            text="支持粘贴工作流文件或目录路径，单个输入回车可直接分析。",
+            bootstyle="secondary",
+        ).pack(anchor="w", pady=(0, 8))
+
+        upload_actions = ttk.Frame(upload_frame)
+        upload_actions.pack(fill=tk.X, pady=(0, 8))
+        ttk.Button(
+            upload_actions,
+            text="选择文件",
+            command=lambda: self.controller.browse_missing_installer_workflow_files() if self.controller else None,
+        ).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(
+            upload_actions,
+            text="选择文件夹",
+            command=lambda: self.controller.browse_missing_installer_workflow_folder() if self.controller else None,
+        ).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(
+            upload_actions,
+            text="清空",
+            command=lambda: self.controller.clear_missing_installer_workflow_inputs() if self.controller else None,
+        ).pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Button(
+            upload_actions,
+            text="分析缺失节点",
+            bootstyle="primary",
+            command=lambda: self.controller.analyze_missing_installer_workflows() if self.controller else None,
+        ).pack(side=tk.LEFT)
+
+        self.missing_installer_selected_paths_listbox = tk.Listbox(upload_frame, height=6, activestyle="none")
+        self.missing_installer_selected_paths_listbox.pack(fill=tk.BOTH, expand=True)
+        self.missing_installer_selected_paths_listbox.bind(
+            "<Return>",
+            lambda event: self.controller.analyze_missing_installer_workflows() if self.controller else None,
+        )
+
+        summary_grid = ttk.Frame(analysis_frame)
+        summary_grid.pack(fill=tk.X, pady=(0, 8))
+        summary_items = [
+            ("工作流", "total_workflows"),
+            ("节点类型", "total_node_types"),
+            ("缺失节点", "missing_count"),
+            ("可安装", "installable_count"),
+            ("人工处理", "manual_count"),
+        ]
+        for column, (label, key) in enumerate(summary_items):
+            item_frame = ttk.Frame(summary_grid, padding=8)
+            item_frame.grid(row=0, column=column, sticky="nsew", padx=(0 if column == 0 else 6, 0))
+            summary_grid.columnconfigure(column, weight=1)
+            ttk.Label(item_frame, text=label, bootstyle="secondary").pack(anchor="w")
+            ttk.Label(item_frame, textvariable=self.missing_installer_summary_vars[key], font=("Segoe UI", 16, "bold")).pack(anchor="w")
+
+        ttk.Button(
+            analysis_frame,
+            text="继续选择插件",
+            bootstyle="primary",
+            command=lambda: self.controller.advance_missing_installer_to_selection() if self.controller else None,
+        ).pack(anchor="w")
+
+        select_actions = ttk.Frame(select_frame)
+        select_actions.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(select_actions, text="双击插件包可切换勾选", bootstyle="secondary").pack(side=tk.LEFT)
+        ttk.Button(
+            select_actions,
+            text="直接安装",
+            bootstyle="primary",
+            command=lambda: self.controller.start_missing_installer_installation(ignore_preflight=True) if self.controller else None,
+        ).pack(side=tk.RIGHT)
+        ttk.Button(
+            select_actions,
+            text="预检依赖",
+            bootstyle="secondary",
+            command=lambda: self.controller.run_missing_installer_dependency_preflight() if self.controller else None,
+        ).pack(side=tk.RIGHT, padx=(0, 6))
+
+        self.missing_installer_package_tree = ttk.Treeview(
+            select_frame,
+            columns=("selected", "title", "missing_count", "state", "status"),
+            show="headings",
+            height=8,
+        )
+        self.missing_installer_package_tree.heading("selected", text="选择")
+        self.missing_installer_package_tree.heading("title", text="插件包")
+        self.missing_installer_package_tree.heading("missing_count", text="覆盖节点")
+        self.missing_installer_package_tree.heading("state", text="当前状态")
+        self.missing_installer_package_tree.heading("status", text="安装状态")
+        self.missing_installer_package_tree.column("selected", width=60, anchor="center")
+        self.missing_installer_package_tree.column("title", width=280)
+        self.missing_installer_package_tree.column("missing_count", width=90, anchor="center")
+        self.missing_installer_package_tree.column("state", width=100, anchor="center")
+        self.missing_installer_package_tree.column("status", width=120, anchor="center")
+        self.missing_installer_package_tree.pack(fill=tk.BOTH, expand=True)
+        self.missing_installer_package_tree.bind(
+            "<Double-1>",
+            lambda event: self.controller.toggle_missing_installer_package_selection() if self.controller else None,
+        )
+
+        manual_frame = ttk.Frame(select_frame)
+        manual_frame.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
+        ttk.Label(manual_frame, text="需人工处理", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 4))
+        self.missing_installer_manual_listbox = tk.Listbox(manual_frame, height=5, activestyle="none")
+        self.missing_installer_manual_listbox.pack(fill=tk.BOTH, expand=True)
+
+        preflight_summary_grid = ttk.Frame(preflight_frame)
+        preflight_summary_grid.pack(fill=tk.X, pady=(0, 8))
+        preflight_summary_items = [
+            ("安全", "safe"),
+            ("需策略安装", "safe_with_policy"),
+            ("警告", "warning"),
+            ("阻断", "blocked"),
+        ]
+        for column, (label, key) in enumerate(preflight_summary_items):
+            item_frame = ttk.Frame(preflight_summary_grid, padding=8)
+            item_frame.grid(row=0, column=column, sticky="nsew", padx=(0 if column == 0 else 6, 0))
+            preflight_summary_grid.columnconfigure(column, weight=1)
+            ttk.Label(item_frame, text=label, bootstyle="secondary").pack(anchor="w")
+            ttk.Label(
+                item_frame,
+                textvariable=self.missing_installer_preflight_summary_vars[key],
+                font=("Segoe UI", 16, "bold"),
+            ).pack(anchor="w")
+
+        preflight_actions = ttk.Frame(preflight_frame)
+        preflight_actions.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(
+            preflight_actions,
+            text="系统会先按 aki 规则评估风险，再决定是否允许继续安装。",
+            bootstyle="secondary",
+        ).pack(side=tk.LEFT)
+        self.missing_installer_preflight_safe_button = ttk.Button(
+            preflight_actions,
+            text="仅安装安全项",
+            bootstyle="secondary",
+            command=lambda: self.controller.start_missing_installer_installation(safe_only=True) if self.controller else None,
+        )
+        self.missing_installer_preflight_safe_button.pack(side=tk.RIGHT, padx=(6, 0))
+        self.missing_installer_preflight_install_button = ttk.Button(
+            preflight_actions,
+            text="开始安装",
+            bootstyle="primary",
+            command=lambda: self.controller.start_missing_installer_installation() if self.controller else None,
+        )
+        self.missing_installer_preflight_install_button.pack(side=tk.RIGHT)
+
+        self.missing_installer_preflight_tree = ttk.Treeview(
+            preflight_frame,
+            columns=("title", "source", "strategy", "risk", "conclusion"),
+            show="headings",
+            height=8,
+        )
+        self.missing_installer_preflight_tree.heading("title", text="依赖或插件")
+        self.missing_installer_preflight_tree.heading("source", text="来源插件")
+        self.missing_installer_preflight_tree.heading("strategy", text="推荐策略")
+        self.missing_installer_preflight_tree.heading("risk", text="风险等级")
+        self.missing_installer_preflight_tree.heading("conclusion", text="当前结论")
+        self.missing_installer_preflight_tree.column("title", width=250)
+        self.missing_installer_preflight_tree.column("source", width=220)
+        self.missing_installer_preflight_tree.column("strategy", width=140, anchor="center")
+        self.missing_installer_preflight_tree.column("risk", width=90, anchor="center")
+        self.missing_installer_preflight_tree.column("conclusion", width=160, anchor="center")
+        self.missing_installer_preflight_tree.pack(fill=tk.BOTH, expand=True)
+
+        install_actions = ttk.Frame(install_frame)
+        install_actions.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(install_actions, textvariable=self.missing_installer_queue_progress_var, bootstyle="secondary").pack(side=tk.LEFT)
+        self.missing_installer_restart_button = ttk.Button(
+            install_actions,
+            text="一键重启并复检",
+            bootstyle="warning",
+            command=lambda: self.controller.restart_comfyui_and_recheck_missing_nodes() if self.controller else None,
+        )
+        self.missing_installer_restart_button.pack(side=tk.RIGHT)
+        self.missing_installer_restart_button.pack_forget()
+
+        self.missing_installer_install_tree = ttk.Treeview(
+            install_frame,
+            columns=("title", "status", "missing_count"),
+            show="headings",
+            height=10,
+        )
+        self.missing_installer_install_tree.heading("title", text="插件包")
+        self.missing_installer_install_tree.heading("status", text="状态")
+        self.missing_installer_install_tree.heading("missing_count", text="覆盖节点")
+        self.missing_installer_install_tree.column("title", width=320)
+        self.missing_installer_install_tree.column("status", width=140, anchor="center")
+        self.missing_installer_install_tree.column("missing_count", width=100, anchor="center")
+        self.missing_installer_install_tree.pack(fill=tk.BOTH, expand=True)
+
+        log_frame = ttk.Frame(main_frame)
+        log_frame.pack(fill=tk.BOTH, expand=False, pady=(10, 0))
+        log_actions = ttk.Frame(log_frame)
+        log_actions.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(log_actions, text="任务日志", font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Button(
+            log_actions,
+            text="清空日志",
+            command=lambda: self.controller.clear_missing_installer_log() if self.controller else None,
+        ).pack(side=tk.LEFT)
+        self.missing_installer_log_text = tk.Text(log_frame, height=8, wrap=tk.WORD, relief="solid", borderwidth=1)
+        self.missing_installer_log_text.pack(fill=tk.BOTH, expand=True)
+        self.missing_installer_log_text.config(state=tk.DISABLED)
+
+        self.show_missing_installer_step(0)
+
     def _create_plugin_repair_tab(self):
         """创建插件修复标签页的内容"""
         logger.debug("创建插件修复标签页")
@@ -861,6 +1477,221 @@ class AppView:
     def set_comfyui_path(self, path):
         """设置ComfyUI路径"""
         self.comfyui_path_var.set(path)
+
+    def get_comfyui_python_path(self):
+        """获取 ComfyUI 启动使用的 Python 路径"""
+        return self.comfyui_python_path_var.get().strip()
+
+    def set_comfyui_python_path(self, path):
+        """设置 ComfyUI 启动使用的 Python 路径"""
+        self.comfyui_python_path_var.set(path)
+
+    def append_comfyui_launch_log(self, message):
+        if not self.comfyui_launch_log_text:
+            logger.info(f"ComfyUI Launch Log (widget not available): {message}")
+            return
+
+        try:
+            self.comfyui_launch_log_text.config(state=tk.NORMAL)
+            self.comfyui_launch_log_text.insert(tk.END, f"{message}\n")
+            if self.comfyui_launch_auto_scroll_var.get():
+                self.comfyui_launch_log_text.see(tk.END)
+            self.comfyui_launch_log_text.config(state=tk.DISABLED)
+        except tk.TclError as exc:
+            logger.error(f"Error updating comfyui_launch_log_text: {exc}.")
+
+    def clear_comfyui_launch_log(self):
+        if not self.comfyui_launch_log_text:
+            return
+
+        try:
+            self.comfyui_launch_log_text.config(state=tk.NORMAL)
+            self.comfyui_launch_log_text.delete("1.0", tk.END)
+            self.comfyui_launch_log_text.config(state=tk.DISABLED)
+        except tk.TclError as exc:
+            logger.error(f"Error clearing comfyui_launch_log_text: {exc}.")
+
+    def set_comfyui_launch_status(self, status):
+        self.comfyui_launch_status_var.set(status)
+
+    def set_comfyui_launch_details(self, *, pid="", command=""):
+        self.comfyui_launch_pid_var.set("" if pid in (None, "") else str(pid))
+        self.comfyui_launch_command_var.set(command or "")
+
+    def set_comfyui_launch_button_states(self, *, start_enabled, stop_enabled):
+        if self.comfyui_launch_start_button:
+            self.comfyui_launch_start_button.config(state=tk.NORMAL if start_enabled else tk.DISABLED)
+        if self.comfyui_launch_stop_button:
+            self.comfyui_launch_stop_button.config(state=tk.NORMAL if stop_enabled else tk.DISABLED)
+
+    def set_missing_installer_runtime_status(self, *, comfyui_status, manager_status, start_enabled):
+        self.missing_installer_comfyui_status_var.set(comfyui_status)
+        self.missing_installer_manager_status_var.set(manager_status)
+        if self.missing_installer_start_button:
+            self.missing_installer_start_button.config(state=tk.NORMAL if start_enabled else tk.DISABLED)
+
+    def set_missing_installer_steps(self, *, current_step, completed_steps):
+        completed_steps = set(completed_steps or [])
+        for index, button in enumerate(self.missing_installer_step_buttons):
+            if index == current_step:
+                button.config(bootstyle="primary", state=tk.DISABLED)
+            elif index in completed_steps:
+                button.config(bootstyle="outline-secondary", state=tk.NORMAL)
+            else:
+                button.config(bootstyle="secondary", state=tk.DISABLED)
+
+    def show_missing_installer_step(self, step_index):
+        for index, frame in self.missing_installer_step_frames.items():
+            frame.pack_forget()
+            if index == step_index:
+                frame.pack(fill=tk.BOTH, expand=True)
+
+    def set_missing_installer_selected_paths(self, paths):
+        if not self.missing_installer_selected_paths_listbox:
+            return
+        self.missing_installer_selected_paths_listbox.delete(0, tk.END)
+        for path in paths or []:
+            self.missing_installer_selected_paths_listbox.insert(tk.END, path)
+        if len(paths or []) == 1:
+            self.missing_installer_quick_path_var.set((paths or [""])[0])
+        elif not paths:
+            self.missing_installer_quick_path_var.set("")
+
+    def get_missing_installer_quick_path(self):
+        return self.missing_installer_quick_path_var.get().strip()
+
+    def set_missing_installer_quick_path(self, path):
+        self.missing_installer_quick_path_var.set((path or "").strip())
+
+    def set_missing_installer_analysis_summary(self, summary):
+        summary = summary or {}
+        for key, var in self.missing_installer_summary_vars.items():
+            var.set(str(summary.get(key, 0)))
+
+    def load_missing_installer_packages(self, packages):
+        if not self.missing_installer_package_tree:
+            return
+        for item in self.missing_installer_package_tree.get_children():
+            self.missing_installer_package_tree.delete(item)
+
+        for package in packages or []:
+            self.missing_installer_package_tree.insert(
+                "",
+                tk.END,
+                iid=package["id"],
+                values=(
+                    "√" if package.get("selected", True) else "",
+                    package.get("title", ""),
+                    package.get("missing_count", 0),
+                    package.get("state", ""),
+                    package.get("status", ""),
+                ),
+            )
+
+    def set_missing_installer_preflight_summary(self, summary):
+        summary = summary or {}
+        for key, var in self.missing_installer_preflight_summary_vars.items():
+            var.set(str(summary.get(key, 0)))
+
+    def load_missing_installer_preflight_rows(self, rows):
+        if not self.missing_installer_preflight_tree:
+            return
+        for item in self.missing_installer_preflight_tree.get_children():
+            self.missing_installer_preflight_tree.delete(item)
+
+        for row in rows or []:
+            self.missing_installer_preflight_tree.insert(
+                "",
+                tk.END,
+                iid=row["id"],
+                values=(
+                    row.get("title", ""),
+                    ", ".join(row.get("source_plugins") or []),
+                    row.get("strategy", ""),
+                    row.get("risk_level", ""),
+                    row.get("conclusion_label", ""),
+                ),
+            )
+
+    def set_missing_installer_preflight_actions(self, *, can_install, safe_only_enabled, blocked_count):
+        if self.missing_installer_preflight_install_button:
+            self.missing_installer_preflight_install_button.config(
+                state=tk.DISABLED if blocked_count else (tk.NORMAL if can_install else tk.DISABLED)
+            )
+        if self.missing_installer_preflight_safe_button:
+            self.missing_installer_preflight_safe_button.config(
+                state=tk.NORMAL if safe_only_enabled else tk.DISABLED
+            )
+
+    def get_selected_missing_installer_package_id(self):
+        if not self.missing_installer_package_tree:
+            return None
+        selected = self.missing_installer_package_tree.selection()
+        if selected:
+            return selected[0]
+        focus = self.missing_installer_package_tree.focus()
+        return focus or None
+
+    def load_missing_installer_manual_items(self, items):
+        if not self.missing_installer_manual_listbox:
+            return
+        self.missing_installer_manual_listbox.delete(0, tk.END)
+        for item in items or []:
+            self.missing_installer_manual_listbox.insert(
+                tk.END,
+                f"{item.get('node_type', '')} - {item.get('reason', '')}",
+            )
+
+    def load_missing_installer_install_rows(self, packages):
+        if not self.missing_installer_install_tree:
+            return
+        for item in self.missing_installer_install_tree.get_children():
+            self.missing_installer_install_tree.delete(item)
+
+        for package in packages or []:
+            self.missing_installer_install_tree.insert(
+                "",
+                tk.END,
+                iid=package["id"],
+                values=(
+                    package.get("title", ""),
+                    package.get("status", ""),
+                    package.get("missing_count", 0),
+                ),
+            )
+
+    def append_missing_installer_log(self, message):
+        if not self.missing_installer_log_text:
+            logger.info(f"Missing installer log (widget not available): {message}")
+            return
+        try:
+            self.missing_installer_log_text.config(state=tk.NORMAL)
+            self.missing_installer_log_text.insert(tk.END, f"{message}\n")
+            self.missing_installer_log_text.see(tk.END)
+            self.missing_installer_log_text.config(state=tk.DISABLED)
+        except tk.TclError as exc:
+            logger.error(f"Error updating missing_installer_log_text: {exc}.")
+
+    def clear_missing_installer_log(self):
+        if not self.missing_installer_log_text:
+            return
+        try:
+            self.missing_installer_log_text.config(state=tk.NORMAL)
+            self.missing_installer_log_text.delete("1.0", tk.END)
+            self.missing_installer_log_text.config(state=tk.DISABLED)
+        except tk.TclError as exc:
+            logger.error(f"Error clearing missing_installer_log_text: {exc}.")
+
+    def set_missing_installer_queue_progress(self, message):
+        self.missing_installer_queue_progress_var.set(message or "")
+
+    def set_missing_installer_restart_button_visible(self, visible):
+        if not self.missing_installer_restart_button:
+            return
+        if visible:
+            self.missing_installer_restart_button.pack(side=tk.RIGHT)
+        else:
+            self.missing_installer_restart_button.pack_forget()
     
     def get_selected_plugin(self):
         """获取当前选中的插件名称"""
