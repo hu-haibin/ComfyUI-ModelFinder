@@ -439,7 +439,12 @@ class MissingNodeInstallOrchestrator:
                 for installed_key, installed_value in installed_item.items():
                     item.setdefault(installed_key, installed_value)
                 if item.get("state") in {"not-installed", "", None}:
-                    item["state"] = installed_item.get("state") or "installed"
+                    if installed_item.get("state"):
+                        item["state"] = installed_item.get("state")
+                    elif "enabled" in installed_item:
+                        item["state"] = "enabled" if bool(installed_item.get("enabled")) else "disabled"
+                    else:
+                        item["state"] = "installed"
 
             item["metadata"] = dict(item)
             item["metadata"]["ui_id"] = item.get("hash") or item["id"]

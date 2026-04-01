@@ -358,6 +358,31 @@ def test_comfyui_launcher_service_supports_manager_only_mode(tmp_path: Path) -> 
     ]
 
 
+def test_comfyui_launcher_service_adds_legacy_ui_flag_for_manager_v4(tmp_path: Path) -> None:
+    comfyui_root = tmp_path / "ComfyUI"
+    comfyui_root.mkdir()
+    (comfyui_root / "main.py").write_text("", encoding="utf-8")
+    python_home = tmp_path / "python_embeded"
+    python_home.mkdir()
+    python_exe = python_home / "python.exe"
+    python_exe.write_text("", encoding="utf-8")
+    site_packages = python_home / "Lib" / "site-packages" / "comfyui_manager-4.1.dist-info"
+    site_packages.mkdir(parents=True)
+
+    service = ComfyUILauncherService(port_checker=lambda host, port, timeout: False)
+
+    result = service.validate_paths(str(comfyui_root), str(python_exe))
+
+    assert result.success
+    assert result.data["command"] == [
+        str(python_exe),
+        "-u",
+        "main.py",
+        "--enable-manager",
+        "--enable-manager-legacy-ui",
+    ]
+
+
 def test_comfyui_launcher_service_rejects_duplicate_start(tmp_path: Path) -> None:
     comfyui_root = tmp_path / "ComfyUI"
     comfyui_root.mkdir()
@@ -716,6 +741,120 @@ def test_comfyui_manager_api_service_supports_import_fail_bulk_and_fix_queue() -
     assert import_fail_result.data["impact-pack"]["error"] == "ImportError"
     assert fix_result.success
     assert calls[1]["url"].endswith("/manager/queue/fix")
+
+
+def test_comfyui_manager_api_service_detects_v4_prefix_and_uses_v2_endpoints() -> None:
+    calls = []
+
+    def _requester(**kwargs):
+        calls.append(kwargs)
+        url = kwargs["url"]
+        if url.endswith("/v2/manager/version"):
+            return 200, "V4.1"
+        if url.endswith("/manager/version"):
+            return 404, ""
+        if url.endswith("/v2/manager/db_mode"):
+            return 200, "cache"
+        if url.endswith("/v2/customnode/getmappings?mode=cache"):
+            return 200, json.dumps({})
+        if url.endswith("/v2/manager/queue/start"):
+            return 200, "{}"
+        return 404, ""
+
+    service = ComfyUIManagerApiService(
+        base_url_provider=lambda: "http://127.0.0.1:8188",
+        http_requester=_requester,
+    )
+
+    version_result = service.get_version()
+    db_mode_result = service.get_db_mode()
+    mappings_result = service.get_node_mappings("cache")
+    start_result = service.start_queue()
+
+    assert version_result.success
+    assert version_result.data["value"] == "V4.1"
+    assert db_mode_result.success
+    assert mappings_result.success
+    assert start_result.success
+    assert any(call["url"].endswith("/v2/manager/db_mode") for call in calls)
+    assert any(call["url"].endswith("/v2/customnode/getmappings?mode=cache") for call in calls)
+    assert calls[-1]["url"].endswith("/v2/manager/queue/start")
+
+
+def test_comfyui_manager_api_service_falls_back_to_local_custom_node_cache(tmp_path: Path) -> None:
+    comfyui_root = tmp_path / "ComfyUI"
+    cache_dir = comfyui_root / "user" / "__manager" / "cache"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "123_custom-node-list.json").write_text(
+        json.dumps(
+            {
+                "custom_nodes": [
+                    {
+                        "id": "impact-pack",
+                        "title": "Impact Pack",
+                        "files": ["https://github.com/ltdrdata/ComfyUI-Impact-Pack"],
+                        "reference": "https://github.com/ltdrdata/ComfyUI-Impact-Pack",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    service = ComfyUIManagerApiService(
+        base_url_provider=lambda: "http://127.0.0.1:8188",
+        comfyui_path_provider=lambda: str(comfyui_root),
+        http_requester=lambda **kwargs: (404, ""),
+    )
+
+    result = service.get_custom_node_list("cache")
+
+    assert result.success
+    assert result.data["node_packs"]["impact-pack"]["title"] == "Impact Pack"
+    assert result.data["node_packs"]["impact-pack"]["mode"] == "cache"
+
+
+def test_missing_node_install_orchestrator_maps_v4_enabled_state_to_enabled(tmp_path: Path) -> None:
+    workflow_file = tmp_path / "workflow.json"
+    workflow_file.write_text(json.dumps({"nodes": [{"type": "ImpactWildcardProcessor"}]}), encoding="utf-8")
+
+    runtime_api = SimpleNamespace(
+        get_registered_node_types=lambda: SimpleNamespace(success=True, data={"node_types": ["KSampler"]}),
+    )
+    manager_api = SimpleNamespace(
+        is_available=lambda: SimpleNamespace(success=True, data={"value": "V4.1"}),
+        get_db_mode=lambda: SimpleNamespace(success=True, data={"value": "cache"}),
+        get_node_mappings=lambda mode: SimpleNamespace(
+            success=True,
+            data={"impact-pack": [["ImpactWildcardProcessor"], {"title_aux": "Impact Pack"}]},
+        ),
+        get_custom_node_list=lambda mode: SimpleNamespace(
+            success=True,
+            data={
+                "channel": "default",
+                "node_packs": {
+                    "impact-pack": {
+                        "id": "impact-pack",
+                        "title": "Impact Pack",
+                        "version": "1.0.0",
+                        "files": ["https://github.com/ltdrdata/ComfyUI-Impact-Pack"],
+                    }
+                },
+            },
+        ),
+        get_installed_nodes=lambda mode="cache": SimpleNamespace(
+            success=True,
+            data={"impact-pack": {"ver": "1.0.0", "cnr_id": "impact-pack", "enabled": True}},
+        ),
+        get_import_fail_info_bulk=lambda **kwargs: SimpleNamespace(success=True, data={}),
+    )
+    orchestrator = MissingNodeInstallOrchestrator(runtime_api, manager_api, WorkflowMissingNodeService())
+
+    result = orchestrator.prepare_install_plan([str(workflow_file)])
+
+    assert result.success
+    assert result.data["install_plan"][0]["state"] == "enabled"
+    assert result.data["install_plan"][0]["queue_action"] == "update"
 
 
 def test_workflow_missing_node_service_collects_files_and_analyzes_missing_nodes(tmp_path: Path) -> None:

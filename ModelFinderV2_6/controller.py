@@ -59,6 +59,7 @@ class AppController:
         )
         self.comfyui_manager_api_service = ComfyUIManagerApiService(
             base_url_provider=self.comfyui_launcher_service.get_launch_url,
+            comfyui_path_provider=self.get_active_comfyui_path,
         )
         self.workflow_missing_node_service = WorkflowMissingNodeService()
         self.missing_node_install_orchestrator = MissingNodeInstallOrchestrator(

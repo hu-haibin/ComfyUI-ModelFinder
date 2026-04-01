@@ -3,6 +3,7 @@ import queue
 import socket
 import subprocess
 import threading
+from pathlib import Path
 from typing import Callable, Optional
 
 from .adapters.filesystem_adapter import FileSystemAdapter
@@ -247,6 +248,8 @@ class ComfyUILauncherService:
 
         if self._enable_manager or launch_mode == self.MANAGER_ONLY_MODE:
             command.append("--enable-manager")
+            if self._should_enable_manager_legacy_ui(python_path):
+                command.append("--enable-manager-legacy-ui")
 
         if launch_mode == self.MANAGER_ONLY_MODE:
             command.append("--disable-all-custom-nodes")
@@ -256,6 +259,18 @@ class ComfyUILauncherService:
                 command.extend(manager_dirs)
 
         return command
+
+    @staticmethod
+    def _should_enable_manager_legacy_ui(python_path: str) -> bool:
+        try:
+            site_packages = Path(python_path).resolve().parent / "Lib" / "site-packages"
+        except Exception:
+            return False
+
+        if not site_packages.exists():
+            return False
+
+        return any(site_packages.glob("comfyui_manager-4*.dist-info"))
 
     def _detect_manager_directories(self, comfyui_path: str) -> list[str]:
         manager_dirs = []
