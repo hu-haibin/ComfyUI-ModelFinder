@@ -18,7 +18,7 @@
 > [!IMPORTANT]
 > ## 🚀 寻找更强大的 ComfyUI 管理工具？试试 ModelFinder Launcher！
 >
-> **ComfyUI-ModelFinder** 是开源的命令行/桌面模型查找工具。如果你希望获得 **更完整的 ComfyUI 管理体验**，我们推荐升级到 **[ModelFinder Launcher](https://github.com/hu-haibin/ModelFinder-Releases)**——一款功能全面的 ComfyUI 一站式启动器：
+> **ComfyUI-ModelFinder** 是开源的命令行/桌面模型查找工具。如果你希望获得 **更完整的 ComfyUI 管理体验**，我们推荐升级到 **[ModelFinder Launcher（官方发版仓）](https://github.com/hu-haibin/wonderful-launcher-comfyui)**——一款功能全面的 ComfyUI 一站式启动器：
 >
 > - ✅ **内置模型匹配引擎**（1000+ 模型目录，自动匹配 HuggingFace / ModelScope / Civitai）
 > - ✅ **一键部署 ComfyUI**（选版本 / GPU / 预装插件，全程可视化）
@@ -26,9 +26,9 @@
 > - ✅ **多实例管理 / PyTorch 版本切换 / 插件管理 / 批量出图**
 > - ✅ **Windows Fluent Design 现代 UI，深色/浅色主题**
 >
-> 👉 **[立即下载 ModelFinder Launcher（免费）](https://github.com/hu-haibin/ModelFinder-Releases/releases/latest)**
+> 👉 **[立即下载 ModelFinder Launcher（免费）](https://github.com/hu-haibin/wonderful-launcher-comfyui/releases/latest)**
 >
-> ![ModelFinder Launcher 主界面](https://raw.githubusercontent.com/hu-haibin/ModelFinder-Releases/main/screenshots/home.png)
+> ![ModelFinder Launcher 主界面](https://raw.githubusercontent.com/hu-haibin/wonderful-launcher-comfyui/main/assets/screenshots/2.0.15-home.png)
 
 ---
 
@@ -155,7 +155,7 @@ python run_model_finder.py
 | **批量出图** | ❌ | ✅ 通过 API 自动化出图 |
 | **适合人群** | 想要轻量、开源方案 | 想要一站式管理体验 |
 
-👉 **[下载 ModelFinder Launcher](https://github.com/hu-haibin/ModelFinder-Releases/releases/latest)**
+👉 **[下载 ModelFinder Launcher](https://github.com/hu-haibin/wonderful-launcher-comfyui/releases/latest)**
 
 </details>
 
@@ -163,7 +163,7 @@ python run_model_finder.py
 
 ## 🔗 相关链接
 
-- 🚀 **[ModelFinder Launcher](https://github.com/hu-haibin/ModelFinder-Releases)** — 一站式 ComfyUI 管理启动器（推荐）
+- 🚀 **[ModelFinder Launcher 官方发版仓](https://github.com/hu-haibin/wonderful-launcher-comfyui)** — 一站式 ComfyUI 管理启动器（推荐）
 - 🐛 **[Issues](https://github.com/hu-haibin/ComfyUI-ModelFinder/issues)** — Bug 反馈 / 功能建议
 - ⭐ **觉得有用？给个 Star！**
 
@@ -179,6 +179,6 @@ python run_model_finder.py
 
 **ComfyUI-ModelFinder** — 解决 ComfyUI "模型缺失红框报错"的开源方案
 
-想要更完整的体验？试试 👉 **[ModelFinder Launcher](https://github.com/hu-haibin/ModelFinder-Releases)**
+想要更完整的体验？试试 👉 **[ModelFinder Launcher 官方发版仓](https://github.com/hu-haibin/wonderful-launcher-comfyui)**
 
 </div>
