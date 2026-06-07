@@ -4,3 +4,5 @@ app.log
 ModelFinderV2_*/__pycache__/
 ModelFinderV2_*/results/
 .kiro/
+.tmp_*.log
+tmp_*.json
