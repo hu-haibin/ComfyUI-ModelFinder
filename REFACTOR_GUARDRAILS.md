@@ -8,6 +8,13 @@ This document is the single source of truth for the current `ComfyUI-ModelFinder
 - `ComfyLauncher_Project` is explicitly out of scope.
 - The current baseline is a backend-focused refactor with no intended user-visible change.
 
+## Approved UX Scope Change
+
+- The current UX phase explicitly allows consolidating the former `单个处理` and `批量处理` tabs into one `工作流` tab.
+- This scope change is limited to entry consolidation and reduced switching overhead.
+- The underlying single-file and batch processing chains remain unchanged.
+- CSV / HTML / batch summary output contracts remain unchanged.
+
 ## Frozen User Boundary
 
 The following items are frozen during this refactor:

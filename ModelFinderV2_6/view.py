@@ -23,6 +23,7 @@ class AppView:
         self.tab_comfyui_launch = None # ComfyUI 启动标签页的引用
 
         self.tab_missing_installer = None
+        self.tab_model_audit = None
 
         self.workflow_path_var = tk.StringVar()
         self.workflow_dir_var = tk.StringVar()
@@ -111,6 +112,21 @@ class AppView:
         self.missing_installer_preflight_install_button = None
         self.missing_installer_preflight_safe_button = None
         self.missing_installer_restart_button = None
+        self.model_audit_comfyui_status_var = tk.StringVar(value="未启动")
+        self.model_audit_catalog_status_var = tk.StringVar(value="未加载")
+        self.model_audit_quick_path_var = tk.StringVar(value="")
+        self.model_audit_summary_vars = {
+            "workflow_count": tk.StringVar(value="0"),
+            "core_reference_count": tk.StringVar(value="0"),
+            "resolved_count": tk.StringVar(value="0"),
+            "missing_core_count": tk.StringVar(value="0"),
+            "needs_extension_count": tk.StringVar(value="0"),
+        }
+        self.model_audit_selected_paths_listbox = None
+        self.model_audit_tree = None
+        self.model_audit_unresolved_listbox = None
+        self.model_audit_log_text = None
+        self.model_audit_start_button = None
 
         self._set_icon()
         self._create_main_widgets() # self.notebook 在这里创建
@@ -119,6 +135,10 @@ class AppView:
             self.tab_missing_installer = ttk.Frame(self.notebook, padding="10")
             self.notebook.add(self.tab_missing_installer, text="缺失节点安装")
             self._create_missing_installer_tab()
+        if self.notebook and not self.tab_model_audit:
+            self.tab_model_audit = ttk.Frame(self.notebook, padding="10")
+            self.notebook.add(self.tab_model_audit, text="模型依赖检测")
+            self._create_model_audit_tab()
         logger.debug("AppView initialized.")
 
     def set_controller(self, controller):
@@ -201,6 +221,10 @@ class AppView:
         self.notebook.add(self.tab_comfyui_launch, text="启动 ComfyUI")
         self._create_comfyui_launch_tab()
 
+        self.tab_model_audit = ttk.Frame(self.notebook, padding="10")
+        self.notebook.add(self.tab_model_audit, text="模型依赖检测")
+        self._create_model_audit_tab()
+
         # 设置标签页
         self.tab_settings = ttk.Frame(self.notebook, padding="10")
         self.notebook.add(self.tab_settings, text="设置")
@@ -218,7 +242,7 @@ class AppView:
 
         button_frame = ttk.Frame(main_frame)
         button_frame.grid(row=2, column=0, columnspan=3, sticky="w", pady=10)
-        ttk.Button(button_frame, text="一键分析并搜索", style="success.TButton", command=lambda: self.controller.analyze_and_search() if self.controller else None).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(button_frame, text="开始分析并搜索", style="success.TButton", command=lambda: self.controller.analyze_and_search() if self.controller else None).pack(side=tk.LEFT, padx=(0, 5))
         self.view_result_button = ttk.Button(button_frame, text="查看结果", command=lambda: self.controller.view_result() if self.controller else None, state=tk.DISABLED)
         self.view_result_button.pack(side=tk.LEFT)
 
@@ -289,7 +313,7 @@ class AppView:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.result_tree.config(yscrollcommand=scrollbar.set)
 
-        self.view_batch_html_button = ttk.Button(main_frame, text="查看汇总HTML结果", command=lambda: self.controller.view_batch_html() if self.controller else None)
+        self.view_batch_html_button = ttk.Button(main_frame, text="查看汇总结果", command=lambda: self.controller.view_batch_html() if self.controller else None)
         self.view_batch_html_button.grid(row=8, column=0, columnspan=3, sticky="w", pady=10)
 
         main_frame.columnconfigure(1, weight=1)
@@ -1075,7 +1099,7 @@ class AppView:
         ).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Button(
             action_frame,
-            text="校验路径",
+            text="检查路径",
             command=lambda: self.controller.validate_comfyui_launch_paths() if self.controller else None,
         ).pack(side=tk.LEFT)
 
@@ -1098,7 +1122,7 @@ class AppView:
 
         log_actions = ttk.Frame(log_frame)
         log_actions.pack(fill=tk.X, pady=(0, 6))
-        ttk.Label(log_actions, text="启动日志", font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Label(log_actions, text="运行日志", font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT, padx=(0, 12))
         ttk.Button(
             log_actions,
             text="清空日志",
@@ -1123,6 +1147,138 @@ class AppView:
         scrollbar = ttk.Scrollbar(log_content_frame, orient=tk.VERTICAL, command=self.comfyui_launch_log_text.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.comfyui_launch_log_text.config(yscrollcommand=scrollbar.set, state=tk.DISABLED)
+
+    def _create_model_audit_tab(self):
+        logger.debug("Creating workflow model audit tab.")
+
+        main_frame = ttk.Frame(self.tab_model_audit, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        header_frame = ttk.Frame(main_frame)
+        header_frame.pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(header_frame, text="模型依赖检测", font=("Segoe UI", 13, "bold")).pack(side=tk.LEFT)
+
+        status_frame = ttk.Frame(header_frame)
+        status_frame.pack(side=tk.RIGHT)
+        ttk.Label(status_frame, text="ComfyUI", bootstyle="secondary").pack(side=tk.LEFT, padx=(0, 4))
+        ttk.Label(status_frame, textvariable=self.model_audit_comfyui_status_var, bootstyle="info").pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Label(status_frame, text="模型目录", bootstyle="secondary").pack(side=tk.LEFT, padx=(0, 4))
+        ttk.Label(status_frame, textvariable=self.model_audit_catalog_status_var, bootstyle="info").pack(side=tk.LEFT, padx=(0, 12))
+        self.model_audit_start_button = ttk.Button(
+            status_frame,
+            text="启动 ComfyUI 后继续检测",
+            bootstyle="success",
+            command=lambda: self.controller.start_comfyui_for_model_audit() if self.controller else None,
+        )
+        self.model_audit_start_button.pack(side=tk.LEFT)
+
+        quick_input_frame = ttk.Frame(main_frame)
+        quick_input_frame.pack(fill=tk.X, pady=(0, 8))
+        model_audit_entry = ttk.Entry(quick_input_frame, textvariable=self.model_audit_quick_path_var)
+        model_audit_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6))
+        model_audit_entry.bind(
+            "<Return>",
+            lambda event: self.controller.add_model_audit_quick_path(auto_analyze=True) if self.controller else None,
+        )
+        ttk.Button(
+            quick_input_frame,
+            text="添加路径",
+            command=lambda: self.controller.add_model_audit_quick_path() if self.controller else None,
+        ).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(
+            quick_input_frame,
+            text="粘贴",
+            command=lambda: self.controller.paste_model_audit_path() if self.controller else None,
+        ).pack(side=tk.LEFT)
+
+        action_frame = ttk.Frame(main_frame)
+        action_frame.pack(fill=tk.X, pady=(0, 8))
+        ttk.Button(
+            action_frame,
+            text="选择文件",
+            command=lambda: self.controller.browse_model_audit_workflow_files() if self.controller else None,
+        ).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(
+            action_frame,
+            text="选择文件夹",
+            command=lambda: self.controller.browse_model_audit_workflow_folder() if self.controller else None,
+        ).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(
+            action_frame,
+            text="清空",
+            command=lambda: self.controller.clear_model_audit_workflow_inputs() if self.controller else None,
+        ).pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Button(
+            action_frame,
+            text="刷新运行时模型列表",
+            command=lambda: self.controller.refresh_model_audit_catalog() if self.controller else None,
+        ).pack(side=tk.RIGHT)
+        ttk.Button(
+            action_frame,
+            text="开始检测",
+            bootstyle="primary",
+            command=lambda: self.controller.run_model_audit() if self.controller else None,
+        ).pack(side=tk.RIGHT, padx=(0, 6))
+
+        self.model_audit_selected_paths_listbox = tk.Listbox(main_frame, height=5, activestyle="none")
+        self.model_audit_selected_paths_listbox.pack(fill=tk.BOTH, expand=False, pady=(0, 10))
+
+        summary_grid = ttk.Frame(main_frame)
+        summary_grid.pack(fill=tk.X, pady=(0, 8))
+        summary_items = [
+            ("工作流数量", "workflow_count"),
+            ("检测到的模型", "core_reference_count"),
+            ("当前已有", "resolved_count"),
+            ("当前缺少", "missing_core_count"),
+            ("暂时无法判断", "needs_extension_count"),
+        ]
+        for column, (label, key) in enumerate(summary_items):
+            item_frame = ttk.Frame(summary_grid, padding=8)
+            item_frame.grid(row=0, column=column, sticky="nsew", padx=(0 if column == 0 else 6, 0))
+            summary_grid.columnconfigure(column, weight=1)
+            ttk.Label(item_frame, text=label, bootstyle="secondary").pack(anchor="w")
+            ttk.Label(item_frame, textvariable=self.model_audit_summary_vars[key], font=("Segoe UI", 16, "bold")).pack(anchor="w")
+
+        self.model_audit_tree = ttk.Treeview(
+            main_frame,
+            columns=("model_name", "model_type", "source_node_type", "workflow_count", "status", "sample_workflow"),
+            show="headings",
+            height=10,
+        )
+        self.model_audit_tree.heading("model_name", text="模型名")
+        self.model_audit_tree.heading("model_type", text="类型")
+        self.model_audit_tree.heading("source_node_type", text="来源节点")
+        self.model_audit_tree.heading("workflow_count", text="工作流数")
+        self.model_audit_tree.heading("status", text="检测结果")
+        self.model_audit_tree.heading("sample_workflow", text="示例工作流")
+        self.model_audit_tree.column("model_name", width=280)
+        self.model_audit_tree.column("model_type", width=110, anchor="center")
+        self.model_audit_tree.column("source_node_type", width=180)
+        self.model_audit_tree.column("workflow_count", width=80, anchor="center")
+        self.model_audit_tree.column("status", width=140, anchor="center")
+        self.model_audit_tree.column("sample_workflow", width=220)
+        self.model_audit_tree.pack(fill=tk.BOTH, expand=True)
+
+        unresolved_frame = ttk.Frame(main_frame)
+        unresolved_frame.pack(fill=tk.BOTH, expand=False, pady=(8, 0))
+        ttk.Label(unresolved_frame, text="暂时无法判断", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 4))
+        ttk.Label(
+            unresolved_frame,
+            text="这类内容通常来自第三方插件或特殊工作流格式，暂时不能准确判断。",
+            bootstyle="secondary",
+        ).pack(anchor="w", pady=(0, 4))
+        self.model_audit_unresolved_listbox = tk.Listbox(unresolved_frame, height=5, activestyle="none")
+        self.model_audit_unresolved_listbox.pack(fill=tk.BOTH, expand=True)
+
+        log_frame = ttk.Frame(main_frame)
+        log_frame.pack(fill=tk.BOTH, expand=False, pady=(10, 0))
+        log_actions = ttk.Frame(log_frame)
+        log_actions.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(log_actions, text="任务日志", font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Button(log_actions, text="清空日志", command=lambda: self.clear_model_audit_log()).pack(side=tk.LEFT)
+        self.model_audit_log_text = tk.Text(log_frame, height=8, wrap=tk.WORD, relief="solid", borderwidth=1)
+        self.model_audit_log_text.pack(fill=tk.BOTH, expand=True)
+        self.model_audit_log_text.config(state=tk.DISABLED)
 
     def _create_missing_installer_tab(self):
         logger.debug("Creating missing installer tab.")
@@ -1151,7 +1307,7 @@ class AppView:
         steps_frame = ttk.Frame(main_frame)
         steps_frame.pack(fill=tk.X, pady=(0, 10))
         self.missing_installer_step_buttons = []
-        for index, title in enumerate(["上传工作流", "分析缺失节点", "选择插件", "预检依赖", "下载安装"]):
+        for index, title in enumerate(["上传工作流", "分析缺失节点", "选择插件", "安装前检查", "下载安装"]):
             button = ttk.Button(
                 steps_frame,
                 text=f"{index + 1}. {title}",
@@ -1271,7 +1427,7 @@ class AppView:
         ).pack(side=tk.RIGHT)
         ttk.Button(
             select_actions,
-            text="预检依赖",
+            text="安装前检查",
             bootstyle="secondary",
             command=lambda: self.controller.run_missing_installer_dependency_preflight() if self.controller else None,
         ).pack(side=tk.RIGHT, padx=(0, 6))
@@ -1284,8 +1440,8 @@ class AppView:
         )
         self.missing_installer_package_tree.heading("selected", text="选择")
         self.missing_installer_package_tree.heading("title", text="插件包")
-        self.missing_installer_package_tree.heading("missing_count", text="覆盖节点")
-        self.missing_installer_package_tree.heading("state", text="当前状态")
+        self.missing_installer_package_tree.heading("missing_count", text="关联节点")
+        self.missing_installer_package_tree.heading("state", text="插件状态")
         self.missing_installer_package_tree.heading("status", text="安装状态")
         self.missing_installer_package_tree.column("selected", width=60, anchor="center")
         self.missing_installer_package_tree.column("title", width=280)
@@ -1300,7 +1456,7 @@ class AppView:
 
         manual_frame = ttk.Frame(select_frame)
         manual_frame.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
-        ttk.Label(manual_frame, text="需人工处理", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 4))
+        ttk.Label(manual_frame, text="需要手动处理", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 4))
         self.missing_installer_manual_listbox = tk.Listbox(manual_frame, height=5, activestyle="none")
         self.missing_installer_manual_listbox.pack(fill=tk.BOTH, expand=True)
 
@@ -1327,7 +1483,7 @@ class AppView:
         preflight_actions.pack(fill=tk.X, pady=(0, 6))
         ttk.Label(
             preflight_actions,
-            text="系统会先按 aki 规则评估风险，再决定是否允许继续安装。",
+            text="系统会先检查安装风险，再决定是否建议继续安装。",
             bootstyle="secondary",
         ).pack(side=tk.LEFT)
         self.missing_installer_preflight_safe_button = ttk.Button(
@@ -1383,7 +1539,7 @@ class AppView:
         )
         self.missing_installer_install_tree.heading("title", text="插件包")
         self.missing_installer_install_tree.heading("status", text="状态")
-        self.missing_installer_install_tree.heading("missing_count", text="覆盖节点")
+        self.missing_installer_install_tree.heading("missing_count", text="关联节点")
         self.missing_installer_install_tree.column("title", width=320)
         self.missing_installer_install_tree.column("status", width=140, anchor="center")
         self.missing_installer_install_tree.column("missing_count", width=100, anchor="center")
@@ -1693,6 +1849,101 @@ class AppView:
         else:
             self.missing_installer_restart_button.pack_forget()
     
+    def set_model_audit_runtime_status(self, *, comfyui_status, catalog_status, start_enabled):
+        self.model_audit_comfyui_status_var.set(comfyui_status)
+        self.model_audit_catalog_status_var.set(catalog_status)
+        if self.model_audit_start_button:
+            self.model_audit_start_button.config(state=tk.NORMAL if start_enabled else tk.DISABLED)
+
+    def set_model_audit_selected_paths(self, paths):
+        if not self.model_audit_selected_paths_listbox:
+            return
+        self.model_audit_selected_paths_listbox.delete(0, tk.END)
+        for path in paths or []:
+            self.model_audit_selected_paths_listbox.insert(tk.END, path)
+        if len(paths or []) == 1:
+            self.model_audit_quick_path_var.set((paths or [""])[0])
+        elif not paths:
+            self.model_audit_quick_path_var.set("")
+
+    def get_model_audit_quick_path(self):
+        return self.model_audit_quick_path_var.get().strip()
+
+    def set_model_audit_quick_path(self, path):
+        self.model_audit_quick_path_var.set((path or "").strip())
+
+    def set_model_audit_summary(self, summary):
+        summary = summary or {}
+        for key, var in self.model_audit_summary_vars.items():
+            var.set(str(summary.get(key, 0)))
+
+    def _map_model_audit_status_for_display(self, status):
+        status_map = {
+            "resolved": "当前已有",
+            "missing_core_model": "当前缺少",
+            "needs_extension_runtime": "暂时无法判断",
+            "unsupported_workflow_format": "格式不支持",
+        }
+        return status_map.get(status, status or "")
+
+    def load_model_audit_rows(self, rows):
+        if not self.model_audit_tree:
+            return
+        for item in self.model_audit_tree.get_children():
+            self.model_audit_tree.delete(item)
+        for index, row in enumerate(rows or []):
+            self.model_audit_tree.insert(
+                "",
+                tk.END,
+                iid=f"model_audit_{index}",
+                values=(
+                    row.get("model_name", ""),
+                    row.get("model_type", ""),
+                    row.get("source_node_type", ""),
+                    row.get("workflow_count", 0),
+                    self._map_model_audit_status_for_display(row.get("status", "")),
+                    row.get("sample_workflow", ""),
+                ),
+            )
+
+    def load_model_audit_unresolved_items(self, items):
+        if not self.model_audit_unresolved_listbox:
+            return
+        self.model_audit_unresolved_listbox.delete(0, tk.END)
+        for item in items or []:
+            if item.get("status") == "unsupported_workflow_format":
+                self.model_audit_unresolved_listbox.insert(
+                    tk.END,
+                    f"{os.path.basename(item.get('workflow', ''))} - 格式不支持: {item.get('reason', '')}",
+                )
+            else:
+                self.model_audit_unresolved_listbox.insert(
+                    tk.END,
+                    f"{item.get('model_name', '')} - {self._map_model_audit_status_for_display(item.get('status', ''))} - {os.path.basename(item.get('workflow', ''))}",
+                )
+
+    def append_model_audit_log(self, message):
+        if not self.model_audit_log_text:
+            logger.info(f"Model audit log (widget not available): {message}")
+            return
+        try:
+            self.model_audit_log_text.config(state=tk.NORMAL)
+            self.model_audit_log_text.insert(tk.END, f"{message}\n")
+            self.model_audit_log_text.see(tk.END)
+            self.model_audit_log_text.config(state=tk.DISABLED)
+        except tk.TclError as exc:
+            logger.error(f"Error updating model_audit_log_text: {exc}.")
+
+    def clear_model_audit_log(self):
+        if not self.model_audit_log_text:
+            return
+        try:
+            self.model_audit_log_text.config(state=tk.NORMAL)
+            self.model_audit_log_text.delete("1.0", tk.END)
+            self.model_audit_log_text.config(state=tk.DISABLED)
+        except tk.TclError as exc:
+            logger.error(f"Error clearing model_audit_log_text: {exc}.")
+
     def get_selected_plugin(self):
         """获取当前选中的插件名称"""
         selected = self.repair_plugins_tree.selection()

@@ -12,8 +12,29 @@ from .adapters.browser_adapter import BrowserAdapter
 from .adapters.filesystem_adapter import FileSystemAdapter
 from .operation_result import OperationResult
 from .repositories.search_cache_repository import SearchCacheRepository
+from .search_match_evidence import build_match_evidence
 from .search_provider import BingSearchProvider
 from .utils import create_html_view, find_chrome_path, get_mirror_link
+from .workflow_report_service import (
+    COL_ACTUAL_SEARCH_TERM,
+    COL_CONFIDENCE,
+    COL_DOWNLOAD,
+    COL_FILE,
+    COL_HIT_IDENTIFIER,
+    COL_HIT_LINK,
+    COL_HIT_SOURCE,
+    COL_HIT_TITLE,
+    COL_MATCH_REASON,
+    COL_MIRROR,
+    COL_NODE_TYPE,
+    COL_NORMALIZED_FILE,
+    COL_ORIGINAL_FILE,
+    COL_REMOTE_FILE,
+    COL_SEARCH,
+    COL_STATUS,
+    COL_SUSPICIOUS,
+    COL_SUSPICIOUS_REASON,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -158,11 +179,39 @@ class SearchService:
         return bool((found_url or "").strip())
 
     @staticmethod
-    def _apply_search_result_to_row(df, df_idx, search_site, found_url, status):
-        col_status = "\u72b6\u6001"
-        col_download = "\u4e0b\u8f7d\u94fe\u63a5"
-        col_mirror = "\u955c\u50cf\u94fe\u63a5"
-        col_search = "\u641c\u7d22\u94fe\u63a5"
+    def _build_row_evidence(task, result_site, found_url, provider_result=None, cached_evidence=None):
+        provider_result = provider_result or object()
+        evidence = {
+            COL_ORIGINAL_FILE: task.get("original_name_csv", ""),
+            COL_NORMALIZED_FILE: task.get("normalized_name", ""),
+            COL_ACTUAL_SEARCH_TERM: getattr(provider_result, "executed_query", "") or task.get("search_term_query", ""),
+        }
+
+        if cached_evidence:
+            evidence.update({key: (value or "") for key, value in dict(cached_evidence).items()})
+
+        computed = build_match_evidence(
+            original_name=task.get("original_name_csv", ""),
+            normalized_name=task.get("normalized_name", ""),
+            search_term=evidence[COL_ACTUAL_SEARCH_TERM],
+            node_type=task.get("node_type", ""),
+            result_site=result_site,
+            hit_title=evidence.get(COL_HIT_TITLE) or getattr(provider_result, "hit_title", ""),
+            hit_link=evidence.get(COL_HIT_LINK) or getattr(provider_result, "hit_link", ""),
+            found_url=found_url,
+        )
+
+        for key, value in computed.items():
+            evidence[key] = evidence.get(key) or value
+
+        return {key: (value or "") for key, value in evidence.items()}
+
+    @staticmethod
+    def _apply_search_result_to_row(df, df_idx, search_site, found_url, status, evidence=None):
+        col_status = COL_STATUS
+        col_download = COL_DOWNLOAD
+        col_mirror = COL_MIRROR
+        col_search = COL_SEARCH
 
         found_url = (found_url or "").strip()
         status = (status or "").strip()
@@ -185,24 +234,49 @@ class SearchService:
             df.loc[df_idx, col_mirror] = ""
             df.loc[df_idx, col_status] = status or "\u672a\u627e\u5230HF"
 
+        if evidence:
+            for key, value in evidence.items():
+                if key not in df.columns:
+                    df[key] = ""
+                df.loc[df_idx, key] = (value or "").strip() if isinstance(value, str) else value
+
     def search_model_links(self, csv_file, progress_callback=None):
         logger.info("Starting model link search for CSV: %s", csv_file)
         if pd is None:
             logger.error("Search cannot proceed: Missing pandas.")
             return OperationResult(False, "Search dependencies are unavailable.", code="search_dependencies_missing")
 
-        col_status = "\u72b6\u6001"
-        col_download = "\u4e0b\u8f7d\u94fe\u63a5"
-        col_mirror = "\u955c\u50cf\u94fe\u63a5"
-        col_search = "\u641c\u7d22\u94fe\u63a5"
-        col_file = "\u6587\u4ef6\u540d"
-        col_node_type = "\u8282\u70b9\u7c7b\u578b"
+        col_status = COL_STATUS
+        col_download = COL_DOWNLOAD
+        col_mirror = COL_MIRROR
+        col_search = COL_SEARCH
+        col_file = COL_FILE
+        col_node_type = COL_NODE_TYPE
 
         status_processed = "\u5df2\u5904\u7406"
         status_browser_unavailable = "\u641c\u7d22\u9519\u8bef(\u6d4f\u89c8\u5668\u4e0d\u53ef\u7528)"
 
         try:
-            string_cols = [col_status, col_download, col_mirror, col_search, col_file, col_node_type]
+            string_cols = [
+                col_status,
+                col_download,
+                col_mirror,
+                col_search,
+                col_file,
+                col_node_type,
+                COL_ORIGINAL_FILE,
+                COL_NORMALIZED_FILE,
+                COL_REMOTE_FILE,
+                COL_ACTUAL_SEARCH_TERM,
+                COL_HIT_SOURCE,
+                COL_HIT_TITLE,
+                COL_HIT_LINK,
+                COL_HIT_IDENTIFIER,
+                COL_MATCH_REASON,
+                COL_CONFIDENCE,
+                COL_SUSPICIOUS,
+                COL_SUSPICIOUS_REASON,
+            ]
             df = pd.read_csv(
                 csv_file,
                 encoding="utf-8-sig",
@@ -246,12 +320,24 @@ class SearchService:
                 cached_entry = cache.get(cache_key)
                 if self.is_cache_entry_valid(cached_entry):
                     cached_result_site = cached_entry.get("result_site") or cached_entry.get("site") or search_site
+                    row_evidence = self._build_row_evidence(
+                        {
+                            "original_name_csv": original_name_from_csv,
+                            "normalized_name": processed_names["mapped"],
+                            "search_term_query": processed_names["final_search_term"],
+                            "node_type": node_type,
+                        },
+                        cached_result_site,
+                        cached_entry.get("url", ""),
+                        cached_evidence=cached_entry.get("evidence"),
+                    )
                     self._apply_search_result_to_row(
                         df,
                         index,
                         cached_result_site,
                         cached_entry.get("url", ""),
                         cached_entry.get("status", ""),
+                        row_evidence,
                     )
                     cache_hits += 1
                     rows_since_save += 1
@@ -265,6 +351,7 @@ class SearchService:
                         "cache_key": cache_key,
                         "search_site": search_site,
                         "name_for_decision": processed_names["mapped"],
+                        "normalized_name": processed_names["mapped"],
                         "search_term_query": processed_names["final_search_term"],
                         "node_type": node_type,
                         "original_name_csv": original_name_from_csv,
@@ -295,8 +382,16 @@ class SearchService:
             if not chrome_path_to_use and search_tasks:
                 logger.error("Chrome browser not found. Cannot perform search.")
                 for task in search_tasks:
+                    row_evidence = self._build_row_evidence(task, task["search_site"], "", None)
                     for df_idx in task["df_indices"]:
-                        self._apply_search_result_to_row(df, df_idx, task["search_site"], "", status_browser_unavailable)
+                        self._apply_search_result_to_row(
+                            df,
+                            df_idx,
+                            task["search_site"],
+                            "",
+                            status_browser_unavailable,
+                            row_evidence,
+                        )
                         rows_since_save += 1
             else:
                 search_provider = None
@@ -333,9 +428,17 @@ class SearchService:
                             status_text = provider_result.status or (
                                 status_processed if found_url else status_browser_unavailable
                             )
+                            row_evidence = self._build_row_evidence(task, result_site, found_url, provider_result)
 
                             for df_idx in task["df_indices"]:
-                                self._apply_search_result_to_row(df, df_idx, result_site, found_url, status_text)
+                                self._apply_search_result_to_row(
+                                    df,
+                                    df_idx,
+                                    result_site,
+                                    found_url,
+                                    status_text,
+                                    row_evidence,
+                                )
                             rows_since_save += len(task["df_indices"])
 
                             if self._should_cache_result(found_url, status_text):
@@ -344,6 +447,7 @@ class SearchService:
                                     "result_site": result_site,
                                     "url": found_url,
                                     "status": status_text,
+                                    "evidence": row_evidence,
                                     "updated_at": time.time(),
                                 }
                                 cache_dirty = True
@@ -359,8 +463,16 @@ class SearchService:
                             search_provider.close()
                 elif search_tasks:
                     for task in search_tasks:
+                        row_evidence = self._build_row_evidence(task, task["search_site"], "", None)
                         for df_idx in task["df_indices"]:
-                            self._apply_search_result_to_row(df, df_idx, task["search_site"], "", status_browser_unavailable)
+                            self._apply_search_result_to_row(
+                                df,
+                                df_idx,
+                                task["search_site"],
+                                "",
+                                status_browser_unavailable,
+                                row_evidence,
+                            )
                             rows_since_save += 1
 
             df.to_csv(csv_file, index=False, encoding="utf-8-sig")

@@ -10,6 +10,14 @@ from ModelFinderV2_6.workflow_report_service import (
     ALL_MISSING_BASENAME,
     BATCH_RESULTS_BASENAME,
     BATCH_SUMMARY_HEADERS,
+    COL_ACTUAL_SEARCH_TERM,
+    COL_HIT_LINK,
+    COL_HIT_TITLE,
+    COL_MATCH_REASON,
+    COL_NORMALIZED_FILE,
+    COL_ORIGINAL_FILE,
+    COL_REMOTE_FILE,
+    COL_SUSPICIOUS,
     MISSING_FILES_HEADERS,
     WorkflowReportService,
 )
@@ -47,6 +55,10 @@ def test_missing_files_csv_contract_keeps_headers_merge_and_search_link(tmp_path
     assert rows[0][MISSING_FILES_HEADERS[1]] == "1,3"
     assert rows[0][MISSING_FILES_HEADERS[2]] == "CheckpointLoaderSimple"
     assert rows[0][MISSING_FILES_HEADERS[7]].startswith("https://www.bing.com/search?q=")
+    assert rows[0][COL_REMOTE_FILE] == ""
+    assert rows[0][COL_ORIGINAL_FILE] == "a-model.safetensors"
+    assert rows[0][COL_NORMALIZED_FILE] == "a-model.safetensors"
+    assert rows[0][COL_ACTUAL_SEARCH_TERM].startswith('site:huggingface.co')
 
 
 def test_batch_summary_contract_keeps_filename_and_columns(tmp_path: Path) -> None:
@@ -114,6 +126,14 @@ def test_html_report_contract_keeps_core_fields_and_links(tmp_path: Path) -> Non
                 MISSING_FILES_HEADERS[5]: "https://huggingface.co/foo/bar/resolve/main/demo.safetensors",
                 MISSING_FILES_HEADERS[6]: "https://hf-mirror.com/foo/bar/resolve/main/demo.safetensors",
                 MISSING_FILES_HEADERS[7]: "https://www.bing.com/search?q=demo",
+                COL_REMOTE_FILE: "demo.safetensors",
+                COL_ORIGINAL_FILE: "wan2.1_t2v_14b_fp16.safetensors",
+                COL_NORMALIZED_FILE: "wan2.1_t2v_14b_fp16.safetensors",
+                COL_ACTUAL_SEARCH_TERM: 'site:huggingface.co "wan2.1_t2v_14b_fp16"',
+                COL_HIT_TITLE: "Wan2.2 T2V 14B fp16",
+                COL_HIT_LINK: "https://huggingface.co/Wan-AI/Wan2.2-T2V-14B",
+                COL_MATCH_REASON: "可疑点: 版本号不一致(wan2.1 vs wan2.2)",
+                COL_SUSPICIOUS: "是",
             }
         )
 
@@ -128,3 +148,12 @@ def test_html_report_contract_keeps_core_fields_and_links(tmp_path: Path) -> Non
     assert "https://huggingface.co/foo/bar/resolve/main/demo.safetensors" in html
     assert "https://hf-mirror.com/foo/bar/resolve/main/demo.safetensors" in html
     assert "https://www.bing.com/search?q=demo" in html
+    assert "demo.safetensors" in html
+    assert "工作流" in html
+    assert "云端" in html
+    assert f'"label": "{COL_REMOTE_FILE}"' not in html
+    assert "匹配证据" in html
+    assert "<details" in html
+    assert "Wan2.2 T2V 14B fp16" in html
+    assert "版本号不一致" in html
+    assert "table-layout: auto;" in html

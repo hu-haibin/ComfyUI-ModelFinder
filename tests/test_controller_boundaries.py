@@ -74,6 +74,13 @@ class _FakeView:
         self.missing_installer_preflight_actions = None
         self.selected_missing_installer_package_id = None
         self.missing_installer_quick_path = ""
+        self.model_audit_logs = []
+        self.model_audit_runtime = None
+        self.model_audit_paths = []
+        self.model_audit_summary = {}
+        self.model_audit_rows = []
+        self.model_audit_unresolved = []
+        self.model_audit_quick_path = ""
 
     def update_log(self, message):
         self.logs.append(message)
@@ -203,6 +210,37 @@ class _FakeView:
     def set_missing_installer_queue_progress(self, message):
         self.missing_installer_queue_progress = message
 
+    def append_model_audit_log(self, message):
+        self.model_audit_logs.append(message)
+
+    def clear_model_audit_log(self):
+        self.model_audit_logs.clear()
+
+    def set_model_audit_runtime_status(self, *, comfyui_status, catalog_status, start_enabled):
+        self.model_audit_runtime = (comfyui_status, catalog_status, start_enabled)
+
+    def set_model_audit_selected_paths(self, paths):
+        self.model_audit_paths = list(paths)
+        if len(paths) == 1:
+            self.model_audit_quick_path = paths[0]
+        elif not paths:
+            self.model_audit_quick_path = ""
+
+    def get_model_audit_quick_path(self):
+        return self.model_audit_quick_path
+
+    def set_model_audit_quick_path(self, path):
+        self.model_audit_quick_path = path
+
+    def set_model_audit_summary(self, summary):
+        self.model_audit_summary = dict(summary)
+
+    def load_model_audit_rows(self, rows):
+        self.model_audit_rows = [dict(item) for item in rows]
+
+    def load_model_audit_unresolved_items(self, items):
+        self.model_audit_unresolved = [dict(item) for item in items]
+
 
 def _build_controller(view: _FakeView) -> AppController:
     controller = object.__new__(AppController)
@@ -217,6 +255,8 @@ def _build_controller(view: _FakeView) -> AppController:
     controller.missing_node_install_orchestrator = None
     controller.dependency_preflight_service = None
     controller.dependency_install_planner = None
+    controller.workflow_model_audit_service = None
+    controller.comfyui_runtime_model_catalog_service = None
     controller.auto_open_html = _Var()
     controller.random_theme = _Var()
     controller.status_var = _Var("")
@@ -248,6 +288,12 @@ def _build_controller(view: _FakeView) -> AppController:
     controller._manager_runtime_last_check = 0.0
     controller._pending_runtime_wait_deadline = 0.0
     controller._missing_runtime_wait_logged = False
+    controller._model_audit_selected_paths = []
+    controller._model_audit_result = None
+    controller._model_audit_pending = False
+    controller._model_audit_wait_deadline = 0.0
+    controller._model_audit_wait_logged = False
+    controller._model_audit_catalog_loaded = False
     return controller
 
 

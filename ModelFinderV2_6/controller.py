@@ -18,6 +18,7 @@ from .application_runtime_service import ApplicationRuntimeService
 from .comfyui_launcher_service import ComfyUILauncherService
 from .comfyui_manager_api_service import ComfyUIManagerApiService
 from .comfyui_runtime_api_service import ComfyUIRuntimeApiService
+from .comfyui_runtime_model_catalog_service import ComfyUIRuntimeModelCatalogService
 from .dependency_environment_service import DependencyEnvironmentService
 from .dependency_install_planner import DependencyInstallPlanner
 from .dependency_preflight_service import DependencyPreflightService
@@ -28,6 +29,7 @@ from .model_config_service import ModelConfigService
 from .plugin_repair import PluginRepairModel  # 导入插件修复模型
 from .plugin_repair_service import PluginRepairService
 from .result_view_service import ResultViewService
+from .workflow_model_audit_service import WorkflowModelAuditService
 from .workflow_missing_node_service import WorkflowMissingNodeService
 from .workflow_processing_service import WorkflowProcessingService
 from . import __version__, __author__
@@ -57,6 +59,9 @@ class AppController:
         self.comfyui_runtime_api_service = ComfyUIRuntimeApiService(
             base_url_provider=self.comfyui_launcher_service.get_launch_url,
         )
+        self.comfyui_runtime_model_catalog_service = ComfyUIRuntimeModelCatalogService(
+            comfyui_path_provider=self.get_active_comfyui_path,
+        )
         self.comfyui_manager_api_service = ComfyUIManagerApiService(
             base_url_provider=self.comfyui_launcher_service.get_launch_url,
             comfyui_path_provider=self.get_active_comfyui_path,
@@ -79,6 +84,10 @@ class AppController:
         self.dependency_install_planner = DependencyInstallPlanner()
         self.result_view_service = ResultViewService()
         self.runtime_service = ApplicationRuntimeService()
+        self.workflow_model_audit_service = WorkflowModelAuditService(
+            catalog_service=self.comfyui_runtime_model_catalog_service,
+            model_config_manager=self.analysis_model.config_manager,
+        )
 
         self.html_file_path = None
         self.batch_summary_file_path = None
@@ -113,6 +122,12 @@ class AppController:
         self._manager_runtime_last_check = 0.0
         self._pending_runtime_wait_deadline = 0.0
         self._missing_runtime_wait_logged = False
+        self._model_audit_selected_paths = []
+        self._model_audit_result = None
+        self._model_audit_pending = False
+        self._model_audit_wait_deadline = 0.0
+        self._model_audit_wait_logged = False
+        self._model_audit_catalog_loaded = False
 
         self.status_var = tk.StringVar(value="初始化...")
         logger.info("AppController initialized.")
@@ -137,6 +152,8 @@ class AppController:
         self.refresh_comfyui_launch_runtime()
         self.refresh_missing_node_installer_runtime()
         self._sync_missing_node_installer_view()
+        self.refresh_model_audit_runtime()
+        self._sync_model_audit_view()
         self.show_welcome_message()   # Then show welcome message
         logger.debug("Controller initialize sequence finished.")
 
@@ -793,9 +810,16 @@ class AppController:
     def clear_missing_installer_log(self):
         self.view.clear_missing_installer_log()
 
+    def clear_model_audit_log(self):
+        self.view.clear_model_audit_log()
+
     def add_missing_installer_quick_path(self, auto_analyze=False):
         raw_path = self.view.get_missing_installer_quick_path()
         self._add_missing_installer_input_path(raw_path, auto_analyze=auto_analyze)
+
+    def add_model_audit_quick_path(self, auto_analyze=False):
+        raw_path = self.view.get_model_audit_quick_path()
+        self._add_model_audit_input_path(raw_path, auto_analyze=auto_analyze)
 
     def paste_missing_installer_path(self):
         try:
@@ -806,6 +830,16 @@ class AppController:
 
         self.view.set_missing_installer_quick_path(raw_path)
         self._add_missing_installer_input_path(raw_path, auto_analyze=True)
+
+    def paste_model_audit_path(self):
+        try:
+            raw_path = self.root.clipboard_get()
+        except tk.TclError:
+            self.view.append_model_audit_log("剪贴板中没有可用路径。")
+            return
+
+        self.view.set_model_audit_quick_path(raw_path)
+        self._add_model_audit_input_path(raw_path, auto_analyze=True)
 
     def browse_missing_installer_workflow_files(self):
         file_paths = filedialog.askopenfilenames(
@@ -823,6 +857,22 @@ class AppController:
             self.view.append_missing_installer_log("已自动开始分析单个工作流。")
             self.analyze_missing_installer_workflows()
 
+    def browse_model_audit_workflow_files(self):
+        file_paths = filedialog.askopenfilenames(
+            title="选择工作流 JSON 文件",
+            filetypes=[("JSON文件", "*.json"), ("所有文件", "*.*")],
+        )
+        if not file_paths:
+            return
+
+        existing_count = len(self._model_audit_selected_paths)
+        selected_paths = list(dict.fromkeys(self._model_audit_selected_paths + list(file_paths)))
+        self._set_model_audit_paths(selected_paths)
+        self.view.append_model_audit_log(f"已选择 {len(file_paths)} 个工作流文件。")
+        if existing_count == 0 and len(file_paths) == 1:
+            self.view.append_model_audit_log("已自动开始检测单个工作流。")
+            self.run_model_audit()
+
     def browse_missing_installer_workflow_folder(self):
         directory = filedialog.askdirectory(title="选择工作流目录")
         if not directory:
@@ -836,9 +886,26 @@ class AppController:
             self.view.append_missing_installer_log("已自动开始分析当前目录。")
             self.analyze_missing_installer_workflows()
 
+    def browse_model_audit_workflow_folder(self):
+        directory = filedialog.askdirectory(title="选择工作流目录")
+        if not directory:
+            return
+
+        existing_count = len(self._model_audit_selected_paths)
+        selected_paths = list(dict.fromkeys(self._model_audit_selected_paths + [directory]))
+        self._set_model_audit_paths(selected_paths)
+        self.view.append_model_audit_log(f"已添加工作流目录: {directory}")
+        if existing_count == 0:
+            self.view.append_model_audit_log("已自动开始检测当前目录。")
+            self.run_model_audit()
+
     def clear_missing_installer_workflow_inputs(self):
         self._set_missing_installer_paths([])
         self.view.append_missing_installer_log("已清空待分析的工作流。")
+
+    def clear_model_audit_workflow_inputs(self):
+        self._set_model_audit_paths([])
+        self.view.append_model_audit_log("已清空待检测的工作流。")
 
     def go_to_missing_installer_step(self, step_index):
         if step_index == self._missing_installer_step:
@@ -1162,6 +1229,175 @@ class AppController:
             self.view.append_missing_installer_log("已自动开始分析单个输入。")
             self.analyze_missing_installer_workflows()
 
+    def run_model_audit(self):
+        if not self._model_audit_selected_paths:
+            self.update_status("请先选择工作流")
+            self.view.append_model_audit_log("请先选择一个或多个工作流 JSON 文件。")
+            return
+
+        runtime_status = self.refresh_model_audit_runtime()
+        if not runtime_status["comfyui_ready"]:
+            self.update_status("请先启动 ComfyUI")
+            if not self._model_audit_pending:
+                self.view.append_model_audit_log("ComfyUI 未运行，请先启动后继续检测。")
+            return
+
+        self._execute_model_audit()
+
+    def _execute_model_audit(self):
+        result = self.workflow_model_audit_service.audit_workflows(self._model_audit_selected_paths)
+        if not result.success:
+            self._model_audit_pending = False
+            self._model_audit_wait_deadline = 0.0
+            self._model_audit_wait_logged = False
+            self._model_audit_catalog_loaded = False
+            self.refresh_model_audit_runtime()
+            self.update_status("模型依赖检测失败")
+            self.view.append_model_audit_log(result.message)
+            return
+
+        self._model_audit_pending = False
+        self._model_audit_wait_deadline = 0.0
+        self._model_audit_wait_logged = False
+        self._model_audit_catalog_loaded = bool(result.data.get("runtime_ready"))
+        self._model_audit_result = result.data
+        self._sync_model_audit_view()
+        self.refresh_model_audit_runtime()
+        summary = result.data.get("summary", {})
+        self.update_status("模型依赖检测完成")
+        self.view.append_model_audit_log(
+            f"检测完成：{result.data.get('workflow_count', 0)} 个工作流，"
+            f"发现 {summary.get('core_reference_count', 0)} 个模型，"
+            f"当前缺少 {summary.get('missing_core_count', 0)} 个。"
+        )
+
+    def refresh_model_audit_catalog(self):
+        runtime_status = self.refresh_model_audit_runtime()
+        if not runtime_status["comfyui_ready"]:
+            self.view.append_model_audit_log("ComfyUI 未启动，暂时不能读取当前模型列表。")
+            return
+
+        result = self.comfyui_runtime_model_catalog_service.get_core_model_catalog()
+        if not result.success:
+            self._model_audit_catalog_loaded = False
+            self.refresh_model_audit_runtime()
+            self.view.append_model_audit_log(result.message)
+            return
+
+        self._model_audit_catalog_loaded = True
+        self.refresh_model_audit_runtime()
+        summary = result.data.get("summary", {})
+        self.view.append_model_audit_log(
+            "已读取当前 ComfyUI 的模型列表："
+            f"大模型 {summary.get('checkpoints', 0)}，"
+            f"Lora {summary.get('loras', 0)}，"
+            f"VAE {summary.get('vae', 0)}，"
+            f"ControlNet {summary.get('controlnet', 0)}。"
+        )
+
+    def start_comfyui_for_model_audit(self):
+        runtime_status = self.refresh_model_audit_runtime()
+        if runtime_status["comfyui_ready"]:
+            if self._model_audit_selected_paths:
+                self.run_model_audit()
+            else:
+                self.view.append_model_audit_log("ComfyUI 已运行，可直接开始模型依赖检测。")
+            return
+
+        self._model_audit_pending = bool(self._model_audit_selected_paths)
+        self._model_audit_wait_deadline = time.monotonic() + 60.0
+        self._model_audit_wait_logged = False
+        if self._model_audit_selected_paths:
+            self.view.append_model_audit_log("正在启动 ComfyUI，启动完成后继续检测。")
+        else:
+            self.view.append_model_audit_log("正在启动 ComfyUI，启动完成后即可开始模型依赖检测。")
+        self.update_status("正在启动 ComfyUI")
+        self._start_comfyui_with_mode(ComfyUILauncherService.DEFAULT_MODE)
+
+    def refresh_model_audit_runtime(self, snapshot=None):
+        runtime_data = snapshot or self.comfyui_launcher_service.get_runtime_snapshot().data
+        comfyui_state = runtime_data.get("state", "idle")
+        port_open = self.comfyui_launcher_service.is_service_port_open()
+        waiting_runtime = self._is_waiting_for_model_audit_runtime()
+        comfyui_label = self._map_comfyui_runtime_state(comfyui_state)
+
+        comfyui_ready = port_open or comfyui_state == "running"
+        if port_open and comfyui_state != "running":
+            comfyui_label = "运行中"
+        elif waiting_runtime and not port_open:
+            comfyui_label = "启动中"
+
+        if not comfyui_ready:
+            catalog_label = "未启动"
+            self._model_audit_catalog_loaded = False
+        elif self._model_audit_catalog_loaded:
+            catalog_label = "已加载"
+        else:
+            catalog_label = "待加载"
+
+        self.view.set_model_audit_runtime_status(
+            comfyui_status=comfyui_label,
+            catalog_status=catalog_label,
+            start_enabled=not comfyui_ready and not waiting_runtime,
+        )
+        return {"comfyui_ready": comfyui_ready, "catalog_loaded": self._model_audit_catalog_loaded}
+
+    def _sync_model_audit_view(self):
+        result = self._model_audit_result or {}
+        self.view.set_model_audit_selected_paths(self._model_audit_selected_paths)
+        self.view.set_model_audit_summary(result.get("summary", {}))
+        self.view.load_model_audit_rows(result.get("items", []))
+        self.view.load_model_audit_unresolved_items(result.get("unresolved_items", []))
+
+    def _set_model_audit_paths(self, paths):
+        self._model_audit_selected_paths = list(paths or [])
+        self._model_audit_result = None
+        self._model_audit_pending = False
+        self._model_audit_wait_deadline = 0.0
+        self._model_audit_wait_logged = False
+        self._sync_model_audit_view()
+
+    def _add_model_audit_input_path(self, raw_path, *, auto_analyze=False):
+        path = os.path.abspath((raw_path or "").strip().strip('"'))
+        if not path:
+            self.view.append_model_audit_log("请输入或粘贴工作流文件/目录路径。")
+            return
+
+        if not os.path.exists(path):
+            self.view.append_model_audit_log(f"路径不存在: {path}")
+            return
+
+        if not os.path.isdir(path) and not path.lower().endswith(".json"):
+            self.view.append_model_audit_log("只支持 JSON 工作流文件或目录路径。")
+            return
+
+        selected_paths = list(dict.fromkeys(self._model_audit_selected_paths + [path]))
+        if selected_paths == self._model_audit_selected_paths:
+            self.view.append_model_audit_log(f"已存在路径: {path}")
+        else:
+            self._set_model_audit_paths(selected_paths)
+            if os.path.isdir(path):
+                self.view.append_model_audit_log(f"已添加工作流目录: {path}")
+            else:
+                self.view.append_model_audit_log(f"已添加工作流文件: {os.path.basename(path)}")
+
+        if auto_analyze and len(selected_paths) == 1:
+            self.view.append_model_audit_log("已自动开始检测单个输入。")
+            self.run_model_audit()
+
+    def _is_waiting_for_model_audit_runtime(self):
+        if not self._model_audit_wait_deadline:
+            return False
+        return time.monotonic() < self._model_audit_wait_deadline
+
+    def _clear_model_audit_wait(self, log_message=""):
+        self._model_audit_pending = False
+        self._model_audit_wait_deadline = 0.0
+        self._model_audit_wait_logged = False
+        if log_message:
+            self.view.append_model_audit_log(log_message)
+            self.update_status("当前还不能开始检测")
+
     def _update_missing_installer_package_status(self, package_ids, status):
         for item in self._missing_installer_install_plan:
             if item["id"] in package_ids:
@@ -1266,6 +1502,7 @@ class AppController:
             self._last_comfyui_runtime_state = state
 
         self.refresh_missing_node_installer_runtime(snapshot=runtime_data)
+        self.refresh_model_audit_runtime(snapshot=runtime_data)
 
     def _schedule_comfyui_runtime_poll(self):
         if self._comfyui_runtime_poll_scheduled:
@@ -1298,6 +1535,10 @@ class AppController:
             "manager_ready": self._manager_runtime_ready,
         }
 
+        if runtime_status["comfyui_ready"] and self._model_audit_pending:
+            self._model_audit_pending = False
+            self.root.after(0, self._execute_model_audit)
+
         if runtime_status["manager_ready"]:
             if self._pending_missing_analysis:
                 self._pending_missing_analysis = False
@@ -1308,8 +1549,12 @@ class AppController:
 
         if snapshot.get("state") == "running" or self._is_waiting_for_runtime() or self.comfyui_launcher_service.is_service_port_open():
             self._schedule_comfyui_runtime_poll()
-        elif self._pending_runtime_wait_deadline and time.monotonic() >= self._pending_runtime_wait_deadline:
-            self._clear_pending_runtime_wait("等待 ComfyUI/Manager 重启超时，请手动重试。")
+        else:
+            now = time.monotonic()
+            if self._pending_runtime_wait_deadline and now >= self._pending_runtime_wait_deadline:
+                self._clear_pending_runtime_wait("等待 ComfyUI/Manager 重启超时，请手动重试。")
+            if self._model_audit_wait_deadline and now >= self._model_audit_wait_deadline:
+                self._clear_model_audit_wait("等待 ComfyUI 启动超时，请手动重试。")
 
     def _get_comfyui_runtime_poll_delay(self):
         if self._is_waiting_for_runtime():
@@ -1317,11 +1562,11 @@ class AppController:
         return 100 if self._is_missing_installer_install_active() else 250
 
     def _is_waiting_for_runtime(self):
-        if not (self._pending_missing_analysis or self._pending_missing_recheck):
-            return False
-        if not self._pending_runtime_wait_deadline:
-            return False
-        return time.monotonic() < self._pending_runtime_wait_deadline
+        missing_waiting = False
+        if (self._pending_missing_analysis or self._pending_missing_recheck) and self._pending_runtime_wait_deadline:
+            missing_waiting = time.monotonic() < self._pending_runtime_wait_deadline
+
+        return missing_waiting or self._is_waiting_for_model_audit_runtime()
 
     def _clear_pending_runtime_wait(self, log_message=""):
         self._pending_runtime_wait_deadline = 0.0
@@ -1413,6 +1658,8 @@ class AppController:
         self._is_shutting_down = True
         self._pending_missing_analysis = False
         self._pending_missing_recheck = False
+        self._model_audit_pending = False
+        self._model_audit_wait_deadline = 0.0
         try:
             self.comfyui_launcher_service.shutdown()
         except Exception:

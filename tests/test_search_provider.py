@@ -6,7 +6,18 @@ import pytest
 from ModelFinderV2_6.repositories.search_cache_repository import SearchCacheRepository
 from ModelFinderV2_6.search_provider import BingSearchProvider, SearchProviderResult
 from ModelFinderV2_6.search_service import SearchService
-from ModelFinderV2_6.workflow_report_service import MISSING_FILES_HEADERS
+from ModelFinderV2_6.workflow_report_service import (
+    COL_ACTUAL_SEARCH_TERM,
+    COL_HIT_LINK,
+    COL_HIT_SOURCE,
+    COL_HIT_TITLE,
+    COL_MATCH_REASON,
+    COL_NORMALIZED_FILE,
+    COL_ORIGINAL_FILE,
+    COL_REMOTE_FILE,
+    COL_SUSPICIOUS,
+    MISSING_FILES_HEADERS,
+)
 
 
 pytestmark = pytest.mark.unit
@@ -142,6 +153,9 @@ def test_search_service_delegates_search_execution_to_provider(tmp_path: Path) -
                 found_url="https://huggingface.co/foo/bar/blob/main/demo.safetensors",
                 result_site="hf",
                 status="已处理",
+                executed_query='site:huggingface.co "demo.safetensors"',
+                hit_title="Demo safetensors",
+                hit_link="https://huggingface.co/foo/bar/blob/main/demo.safetensors",
             )
 
         def close(self):
@@ -180,6 +194,15 @@ def test_search_service_delegates_search_execution_to_provider(tmp_path: Path) -
     assert row[MISSING_FILES_HEADERS[5]] == "https://huggingface.co/foo/bar/resolve/main/demo.safetensors"
     assert row[MISSING_FILES_HEADERS[6]] == "https://hf-mirror.com/foo/bar/resolve/main/demo.safetensors"
     assert row[MISSING_FILES_HEADERS[4]] == "已处理"
+    assert row[COL_ORIGINAL_FILE] == "demo.safetensors"
+    assert row[COL_NORMALIZED_FILE] == "demo.safetensors"
+    assert row[COL_ACTUAL_SEARCH_TERM] == 'site:huggingface.co "demo.safetensors"'
+    assert row[COL_HIT_SOURCE] == "HuggingFace"
+    assert row[COL_HIT_TITLE] == "Demo safetensors"
+    assert row[COL_HIT_LINK] == "https://huggingface.co/foo/bar/blob/main/demo.safetensors"
+    assert row[COL_REMOTE_FILE] == "demo.safetensors"
+    assert row[COL_MATCH_REASON]
+    assert row[COL_SUSPICIOUS] == "否"
 
 
 def test_bing_search_provider_returns_direct_hf_result() -> None:
@@ -202,6 +225,9 @@ def test_bing_search_provider_returns_direct_hf_result() -> None:
         found_url="https://huggingface.co/foo/bar",
         result_site="hf",
         status="已处理",
+        executed_query='site:huggingface.co "demo"',
+        hit_title="hf",
+        hit_link="https://huggingface.co/foo/bar",
     )
     assert browser.search_box.cleared is True
     assert browser.search_box.inputs == ['site:huggingface.co "demo"']
@@ -228,5 +254,8 @@ def test_bing_search_provider_resolves_liblib_secondary_link_when_first_result_i
         found_url="https://www.liblib.art/modelinfo/demo",
         result_site="liblib",
         status="已处理",
+        executed_query='site:liblib.art "demo"',
+        hit_title="redirect",
+        hit_link="https://www.liblib.art/modelinfo/demo",
     )
     assert browser.back_calls == 0

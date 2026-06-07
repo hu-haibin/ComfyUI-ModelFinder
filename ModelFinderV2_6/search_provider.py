@@ -1,6 +1,9 @@
+import base64
 import logging
+import re
 from dataclasses import dataclass
 from typing import Iterable, List
+from urllib.parse import parse_qs, urlparse
 
 from .adapters.browser_adapter import BrowserAdapter, BrowserAdapterError
 
@@ -13,6 +16,26 @@ class SearchProviderResult:
     found_url: str = ""
     result_site: str = ""
     status: str = ""
+    executed_query: str = ""
+    hit_title: str = ""
+    hit_link: str = ""
+
+
+def _resolve_bing_redirect(url: str) -> str:
+    """Decode a bing.com/ck/a redirect URL to the real destination."""
+    if not url or "bing.com/ck/a" not in url:
+        return url
+    try:
+        qs = parse_qs(urlparse(url).query)
+        encoded = (qs.get("u") or [""])[0]
+        # Bing prefixes the base64 payload with "a1"
+        if encoded.startswith("a1"):
+            encoded = encoded[2:]
+        # add padding
+        encoded += "=" * (-len(encoded) % 4)
+        return base64.b64decode(encoded).decode("utf-8")
+    except Exception:
+        return url
 
 
 class BingSearchProvider:
@@ -41,12 +64,16 @@ class BingSearchProvider:
         status_text = (
             self.STATUS_NOT_FOUND_LIBLIB if result_site == "liblib" else self.STATUS_NOT_FOUND_HF
         )
+        last_query = ""
+        last_title = ""
+        last_link = ""
 
         for search_candidate in candidates:
             candidate_site = search_candidate["search_site"]
             candidate_status = (
                 self.STATUS_NOT_FOUND_LIBLIB if candidate_site == "liblib" else self.STATUS_NOT_FOUND_HF
             )
+            last_query = search_candidate.get("site_query", "") or ""
 
             try:
                 self._browser.visit(search_candidate["bing_url"], timeout=15)
@@ -78,7 +105,11 @@ class BingSearchProvider:
                         if not first_link:
                             candidate_status = self.STATUS_NO_LINK
                         else:
-                            candidate_url = (first_link.attr("href") or "").strip()
+                            last_title = (first_link.text or "").strip()
+                            candidate_url = _resolve_bing_redirect(
+                                (first_link.attr("href") or "").strip()
+                            )
+                            last_link = candidate_url
                             logger.info(
                                 "Found (%s): %r -> %s",
                                 candidate_site,
@@ -87,7 +118,7 @@ class BingSearchProvider:
                             )
 
                             if candidate_site == "liblib":
-                                found_url, candidate_status = self._resolve_liblib_result(
+                                found_url, candidate_status, resolved_link = self._resolve_liblib_result(
                                     results_container,
                                     first_link,
                                     candidate_url,
@@ -97,6 +128,9 @@ class BingSearchProvider:
                                         found_url=found_url,
                                         result_site=candidate_site,
                                         status=candidate_status,
+                                        executed_query=last_query,
+                                        hit_title=last_title,
+                                        hit_link=resolved_link,
                                     )
                             else:
                                 if candidate_url and "huggingface.co" in candidate_url:
@@ -104,6 +138,9 @@ class BingSearchProvider:
                                         found_url=candidate_url,
                                         result_site=candidate_site,
                                         status=self.STATUS_PROCESSED,
+                                        executed_query=last_query,
+                                        hit_title=last_title,
+                                        hit_link=candidate_url,
                                     )
                                 candidate_status = self.STATUS_NOT_FOUND_HF
             except BrowserAdapterError:
@@ -111,6 +148,9 @@ class BingSearchProvider:
                     found_url="",
                     result_site=result_site,
                     status=self.STATUS_BROWSER_UNAVAILABLE,
+                    executed_query=last_query,
+                    hit_title=last_title,
+                    hit_link=last_link,
                 )
             except Exception:
                 logger.error(
@@ -123,7 +163,14 @@ class BingSearchProvider:
 
             status_text = candidate_status
 
-        return SearchProviderResult(found_url="", result_site=result_site, status=status_text)
+        return SearchProviderResult(
+            found_url="",
+            result_site=result_site,
+            status=status_text,
+            executed_query=last_query,
+            hit_title=last_title,
+            hit_link=last_link,
+        )
 
     def _resolve_liblib_result(self, results_container, first_link, candidate_url: str):
         if candidate_url and "liblib.art" in candidate_url:
@@ -138,25 +185,27 @@ class BingSearchProvider:
                     else:
                         self._browser.back()
                         for item in self._browser.find_all(
-                            "xpath:.//a[contains(@href, 'liblib.art')]",
+                            "xpath:.//h2/a",
                             root=results_container,
                         ):
-                            direct_url = (item.attr("href") or "").strip()
-                            if direct_url and "liblib.art" in direct_url:
-                                liblib_url = direct_url
+                            raw_url = (item.attr("href") or "").strip()
+                            resolved = _resolve_bing_redirect(raw_url)
+                            if resolved and "liblib.art" in resolved:
+                                liblib_url = resolved
                                 break
                 except Exception:
                     logger.debug("Failed to resolve LibLib redirect URL.", exc_info=True)
 
                 if liblib_url:
-                    return liblib_url, self.STATUS_PROCESSED
-                return candidate_url, self.STATUS_NON_DIRECT_LIBLIB
+                    return liblib_url, self.STATUS_PROCESSED, liblib_url
+                return candidate_url, self.STATUS_NON_DIRECT_LIBLIB, candidate_url
 
-            return candidate_url, self.STATUS_PROCESSED
+            return candidate_url, self.STATUS_PROCESSED, candidate_url
 
-        for item in self._browser.find_all("xpath:.//a[contains(@href, 'liblib.art')]", root=results_container):
-            direct_url = (item.attr("href") or "").strip()
-            if direct_url and "liblib.art" in direct_url:
-                return direct_url, self.STATUS_PROCESSED
+        for item in self._browser.find_all("xpath:.//h2/a", root=results_container):
+            raw_url = (item.attr("href") or "").strip()
+            resolved = _resolve_bing_redirect(raw_url)
+            if resolved and "liblib.art" in resolved:
+                return resolved, self.STATUS_PROCESSED, resolved
 
-        return "", self.STATUS_NOT_FOUND_LIBLIB
+        return "", self.STATUS_NOT_FOUND_LIBLIB, ""

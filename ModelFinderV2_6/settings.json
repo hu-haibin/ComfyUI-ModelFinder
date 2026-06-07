@@ -1,7 +1,9 @@
 {
   "auto_open_html": true,
   "chrome_path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "comfyui_path": "E:/123/ComfyUI_windows_portable/ComfyUI",
+  "comfyui_python_path": "E:/123/ComfyUI_windows_portable/python_embeded/python.exe",
   "random_theme": true,
-  "theme": "pulse",
+  "theme": "flatly",
   "retention_days": 20
 }

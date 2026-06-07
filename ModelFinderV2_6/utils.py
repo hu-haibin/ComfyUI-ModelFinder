@@ -10,6 +10,29 @@ import traceback
 import json
 from urllib.parse import urlparse, urljoin
 import csv
+from .workflow_report_service import (
+    COL_ACTUAL_SEARCH_TERM,
+    COL_CONFIDENCE,
+    COL_DOWNLOAD,
+    COL_FILE,
+    COL_HIT_IDENTIFIER,
+    COL_HIT_LINK,
+    COL_HIT_SOURCE,
+    COL_HIT_TITLE,
+    COL_MATCH_REASON,
+    COL_MIRROR,
+    COL_NODE_ID,
+    COL_NODE_TYPE,
+    COL_NORMALIZED_FILE,
+    COL_ORIGINAL_FILE,
+    COL_REMOTE_FILE,
+    COL_SEARCH,
+    COL_SEQ,
+    COL_STATUS,
+    COL_SUSPICIOUS,
+    COL_SUSPICIOUS_REASON,
+    MATCH_EVIDENCE_HEADERS,
+)
 # Ensure pandas is imported if check_dependencies doesn't handle it early enough
 try:
     import pandas as pd
@@ -136,18 +159,19 @@ def create_html_view(csv_file):
         return None
 
     # Canonical CSV column names (unicode escapes to avoid terminal encoding issues)
-    col_seq = '\u5e8f\u53f7'
-    col_file = '\u6587\u4ef6\u540d'
-    col_node_id = '\u8282\u70b9ID'
-    col_node_type = '\u8282\u70b9\u7c7b\u578b'
-    col_download = '\u4e0b\u8f7d\u94fe\u63a5'
-    col_mirror = '\u955c\u50cf\u94fe\u63a5'
+    col_seq = COL_SEQ
+    col_file = COL_FILE
+    col_node_id = COL_NODE_ID
+    col_node_type = COL_NODE_TYPE
+    col_download = COL_DOWNLOAD
+    col_mirror = COL_MIRROR
     col_hf_mirror = 'hf\u955c\u50cf'
-    col_search = '\u641c\u7d22\u94fe\u63a5'
-    col_status = '\u72b6\u6001'
+    col_search = COL_SEARCH
+    col_status = COL_STATUS
     col_csv = 'CSV\u6587\u4ef6'
     col_workflow = '\u5de5\u4f5c\u6d41\u6587\u4ef6'
     col_missing_count = '\u7f3a\u5931\u6570\u91cf'
+    col_evidence_panel = '\u5339\u914d\u8bc1\u636e'
 
     try:
         print(f"Creating HTML view for {csv_file}")
@@ -178,8 +202,11 @@ def create_html_view(csv_file):
                 break
 
         preferred_order = [
-            col_seq, col_file, col_node_id, col_node_type,
+            col_seq, col_file, COL_REMOTE_FILE, col_node_id, col_node_type,
             col_download, col_mirror, col_hf_mirror, col_search, col_status,
+            COL_ORIGINAL_FILE, COL_NORMALIZED_FILE, COL_ACTUAL_SEARCH_TERM,
+            COL_HIT_SOURCE, COL_HIT_TITLE, COL_HIT_LINK, COL_HIT_IDENTIFIER,
+            COL_MATCH_REASON, COL_CONFIDENCE, COL_SUSPICIOUS, COL_SUSPICIOUS_REASON,
             col_csv, col_workflow, col_missing_count,
         ]
 
@@ -198,8 +225,12 @@ def create_html_view(csv_file):
             if actual_col and actual_col not in final_column_order:
                 final_column_order.append(actual_col)
 
+        evidence_keys = [col for col in MATCH_EVIDENCE_HEADERS if col in final_column_order]
+
         column_meta = []
         for col in final_column_order:
+            if col in evidence_keys or col == COL_REMOTE_FILE:
+                continue
             display_name = col
             if col.lower() == col_download.lower():
                 display_name = 'HuggingFace'
@@ -208,6 +239,8 @@ def create_html_view(csv_file):
             elif col.lower() == col_search.lower():
                 display_name = 'LibLib'
             column_meta.append({'key': col, 'label': display_name})
+        if evidence_keys:
+            column_meta.append({'key': col_evidence_panel, 'label': col_evidence_panel})
 
         df_display = df[final_column_order].copy() if final_column_order else df.copy()
         records = df_display.to_dict(orient='records')
@@ -215,6 +248,23 @@ def create_html_view(csv_file):
         records_json = json.dumps(records, ensure_ascii=False).replace('</', r'<\/')
         columns_json = json.dumps(column_meta, ensure_ascii=False).replace('</', r'<\/')
         mirror_key_json = json.dumps(mirror_link_col if mirror_link_col else '', ensure_ascii=False)
+        evidence_keys_json = json.dumps(evidence_keys, ensure_ascii=False).replace('</', r'<\/')
+        evidence_label_map_json = json.dumps(
+            {
+                COL_ORIGINAL_FILE: COL_ORIGINAL_FILE,
+                COL_NORMALIZED_FILE: COL_NORMALIZED_FILE,
+                COL_ACTUAL_SEARCH_TERM: COL_ACTUAL_SEARCH_TERM,
+                COL_HIT_SOURCE: COL_HIT_SOURCE,
+                COL_HIT_TITLE: COL_HIT_TITLE,
+                COL_HIT_LINK: COL_HIT_LINK,
+                COL_HIT_IDENTIFIER: COL_HIT_IDENTIFIER,
+                COL_MATCH_REASON: COL_MATCH_REASON,
+                COL_CONFIDENCE: COL_CONFIDENCE,
+                COL_SUSPICIOUS: COL_SUSPICIOUS,
+                COL_SUSPICIOUS_REASON: COL_SUSPICIOUS_REASON,
+            },
+            ensure_ascii=False,
+        ).replace('</', r'<\/')
 
         html_file = os.path.splitext(csv_file)[0] + '.html'
         source_file = os.path.basename(csv_file)
@@ -272,7 +322,7 @@ def create_html_view(csv_file):
             width: 100%;
             background: #fff;
             border: 1px solid #ddd;
-            table-layout: fixed;
+            table-layout: auto;
         }
         thead th {
             position: sticky;
@@ -281,18 +331,33 @@ def create_html_view(csv_file):
             background: #f3f3f3;
             cursor: pointer;
             user-select: none;
+            white-space: nowrap;
         }
         th, td {
             border: 1px solid #ddd;
             padding: 8px;
             text-align: left;
-            word-break: break-all;
+            word-break: break-word;
+            overflow-wrap: anywhere;
             vertical-align: top;
             font-size: 13px;
         }
         tbody tr:nth-child(even) { background: #fcfcfc; }
 
         .file-name { font-weight: 600; }
+        .file-entry { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+        .file-secondary { margin-top: 6px; font-weight: 500; color: #555; }
+        .file-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 1px 6px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 600;
+            line-height: 1.4;
+        }
+        .badge-workflow { background: #eef2ff; color: #4338ca; }
+        .badge-cloud { background: #e0f2fe; color: #075985; }
         .status-processed { color: #108a00; font-weight: 600; }
         .status-notfound { color: #c33; }
         .status-error { color: #d08400; }
@@ -303,6 +368,15 @@ def create_html_view(csv_file):
         .mirror-link a { background: #d9e8ff; color: #0a57d1; }
         .liblib-link a { background: #daf8dc; color: #167a1d; }
         .no-link { color: #888; text-align: center; }
+        .evidence-col { width: 240px; min-width: 220px; }
+        .evidence-col details { max-width: 240px; }
+        .evidence-col summary { cursor: pointer; color: #0a57d1; font-weight: 600; }
+        .evidence-body { margin-top: 8px; display: grid; gap: 6px; max-width: 240px; }
+        .evidence-item { display: grid; gap: 2px; }
+        .evidence-label { font-size: 12px; color: #666; }
+        .evidence-value { font-size: 13px; color: #111; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
+        .suspicious-yes { color: #b42318; font-weight: 700; }
+        .suspicious-no { color: #108a00; font-weight: 700; }
 
         .pagination {
             margin-top: 10px;
@@ -352,16 +426,22 @@ def create_html_view(csv_file):
         const allRows = __MF_DATA_ROWS__;
         const columns = __MF_COLUMNS__;
         const mirrorLinkKey = __MF_MIRROR_KEY__;
+        const evidenceKeys = __MF_EVIDENCE_KEYS__;
         const showCopyButton = __MF_SHOW_COPY__;
 
         const COL_STATUS = __COL_STATUS__;
         const COL_FILE = __COL_FILE__;
         const COL_CSV = __COL_CSV__;
         const COL_WORKFLOW = __COL_WORKFLOW__;
+        const COL_REMOTE_FILE = __COL_REMOTE_FILE__;
         const COL_DOWNLOAD = __COL_DOWNLOAD__;
         const COL_MIRROR = __COL_MIRROR__;
         const COL_HF_MIRROR = __COL_HF_MIRROR__;
         const COL_SEARCH = __COL_SEARCH__;
+        const COL_CONFIDENCE = __COL_CONFIDENCE__;
+        const COL_SUSPICIOUS = __COL_SUSPICIOUS__;
+        const COL_SUSPICIOUS_REASON = __COL_SUSPICIOUS_REASON__;
+        const COL_EVIDENCE_PANEL = __COL_EVIDENCE_PANEL__;
 
         const STATUS_PROCESSED = __STATUS_PROCESSED__;
 
@@ -385,6 +465,15 @@ def create_html_view(csv_file):
             return key === COL_DOWNLOAD || key === COL_SEARCH || lk === COL_MIRROR.toLowerCase() || lk === COL_HF_MIRROR.toLowerCase();
         }
 
+        function getColumnLabel(key) {
+            const meta = columns.find((item) => item.key === key);
+            if (meta) return meta.label;
+            const evidenceMeta = {
+                __EVIDENCE_LABEL_MAP__
+            };
+            return evidenceMeta[key] || key;
+        }
+
         function getStatusClass(statusText) {
             const s = (statusText || '').toString();
             if (s.includes(STATUS_PROCESSED) || s.includes('Found')) return 'status-processed';
@@ -406,8 +495,12 @@ def create_html_view(csv_file):
             const keyword = (document.getElementById('filterInput').value || '').trim().toLowerCase();
             filteredRows = allRows.filter((row) => {
                 if (!keyword) return true;
+                for (const value of Object.values(row)) {
+                    const normalized = (value || '').toString().toLowerCase();
+                    if (normalized.includes(keyword)) return true;
+                }
                 for (const meta of columns) {
-                    const value = (row[meta.key] || '').toString().toLowerCase();
+                    const value = (meta.label || '').toString().toLowerCase();
                     if (value.includes(keyword)) return true;
                 }
                 return false;
@@ -449,14 +542,75 @@ def create_html_view(csv_file):
             });
         }
 
+        function renderEvidenceCell(row) {
+            if (!evidenceKeys.length) return '<td class="no-link">N/A</td>';
+
+            const confidence = (row[COL_CONFIDENCE] || '').toString().trim();
+            const suspicious = (row[COL_SUSPICIOUS] || '').toString().trim();
+            const suspiciousReason = (row[COL_SUSPICIOUS_REASON] || '').toString().trim();
+            const summaryParts = [];
+            if (confidence) summaryParts.push('置信度 ' + confidence);
+            if (suspicious) summaryParts.push(suspicious === '是' ? '可疑' : '已记录');
+            const summary = summaryParts.length ? summaryParts.join(' | ') : '查看证据';
+            const bodyParts = [];
+
+            for (const key of evidenceKeys) {
+                const value = (row[key] || '').toString().trim();
+                if (!value) continue;
+                bodyParts.push(
+                    '<div class="evidence-item"><span class="evidence-label">' +
+                    escapeHtml(getColumnLabel(key)) +
+                    '</span><span class="evidence-value">' +
+                    escapeHtml(value) +
+                    '</span></div>'
+                );
+            }
+
+            if (bodyParts.length === 0) {
+                bodyParts.push('<div class="evidence-item"><span class="evidence-value">未记录额外证据</span></div>');
+            }
+
+            const suspiciousClass = suspicious === '是' ? 'suspicious-yes' : 'suspicious-no';
+            const detailsOpen = suspicious === '是' || suspiciousReason ? ' open' : '';
+            return (
+                '<td class="evidence-col"><details' + detailsOpen + '><summary class="' + suspiciousClass + '">' +
+                escapeHtml(summary) +
+                '</summary><div class="evidence-body">' +
+                bodyParts.join('') +
+                '</div></details></td>'
+            );
+        }
+
         function renderCell(row, key) {
             const value = (row[key] || '').toString().trim();
+
+            if (key === COL_EVIDENCE_PANEL) {
+                return renderEvidenceCell(row);
+            }
 
             if (key === COL_STATUS) {
                 return '<td class="' + getStatusClass(value) + '">' + escapeHtml(value) + '</td>';
             }
 
-            if (key === COL_FILE || key === COL_CSV || key === COL_WORKFLOW) {
+            if (key === COL_FILE) {
+                const remoteFile = (row[COL_REMOTE_FILE] || '').toString().trim();
+                const parts = [
+                    '<div class="file-entry">' +
+                    '<span>' + escapeHtml(value) + '</span>' +
+                    '<span class="file-badge badge-workflow">工作流</span>'
+                ];
+                if (remoteFile) {
+                    if (remoteFile === value) {
+                        parts.push('<span class="file-badge badge-cloud">云端</span>');
+                    } else {
+                        parts.push('</div><div class="file-entry file-secondary"><span>' + escapeHtml(remoteFile) + '</span><span class="file-badge badge-cloud">云端</span>');
+                    }
+                }
+                parts.push('</div>');
+                return '<td class="file-name">' + parts.join('') + '</td>';
+            }
+
+            if (key === COL_CSV || key === COL_WORKFLOW) {
                 return '<td class="file-name">' + escapeHtml(value) + '</td>';
             }
 
@@ -518,7 +672,14 @@ def create_html_view(csv_file):
         function renderSummary() {
             const total = allRows.length;
             const visible = filteredRows.length;
-            document.getElementById('summaryBar').textContent = 'Total rows: ' + total + ', after filter: ' + visible;
+            const suspiciousCount = evidenceKeys.length
+                ? filteredRows.filter((row) => (row[COL_SUSPICIOUS] || '').toString().trim() === '是').length
+                : 0;
+            let summaryText = 'Total rows: ' + total + ', after filter: ' + visible;
+            if (evidenceKeys.length) {
+                summaryText += ', suspicious in view: ' + suspiciousCount;
+            }
+            document.getElementById('summaryBar').textContent = summaryText;
         }
 
         function renderTable() {
@@ -607,15 +768,22 @@ def create_html_view(csv_file):
             .replace('__MF_DATA_ROWS__', records_json)
             .replace('__MF_COLUMNS__', columns_json)
             .replace('__MF_MIRROR_KEY__', mirror_key_json)
+            .replace('__MF_EVIDENCE_KEYS__', evidence_keys_json)
             .replace('__MF_SHOW_COPY__', show_copy_js)
             .replace('__COL_STATUS__', json.dumps(col_status, ensure_ascii=False))
             .replace('__COL_FILE__', json.dumps(col_file, ensure_ascii=False))
             .replace('__COL_CSV__', json.dumps(col_csv, ensure_ascii=False))
             .replace('__COL_WORKFLOW__', json.dumps(col_workflow, ensure_ascii=False))
+            .replace('__COL_REMOTE_FILE__', json.dumps(COL_REMOTE_FILE, ensure_ascii=False))
             .replace('__COL_DOWNLOAD__', json.dumps(col_download, ensure_ascii=False))
             .replace('__COL_MIRROR__', json.dumps(col_mirror, ensure_ascii=False))
             .replace('__COL_HF_MIRROR__', json.dumps(col_hf_mirror, ensure_ascii=False))
             .replace('__COL_SEARCH__', json.dumps(col_search, ensure_ascii=False))
+            .replace('__COL_CONFIDENCE__', json.dumps(COL_CONFIDENCE, ensure_ascii=False))
+            .replace('__COL_SUSPICIOUS__', json.dumps(COL_SUSPICIOUS, ensure_ascii=False))
+            .replace('__COL_SUSPICIOUS_REASON__', json.dumps(COL_SUSPICIOUS_REASON, ensure_ascii=False))
+            .replace('__COL_EVIDENCE_PANEL__', json.dumps(col_evidence_panel, ensure_ascii=False))
+            .replace('__EVIDENCE_LABEL_MAP__', evidence_label_map_json[1:-1])
             .replace('__STATUS_PROCESSED__', json.dumps('\u5df2\u5904\u7406', ensure_ascii=False))
         )
 

@@ -27,6 +27,7 @@ class ModelFinderApp:
 
             # 3. Initialize the controller (loads settings, links view/controller)
             self.controller.initialize()
+            self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         except Exception as e:
             import logging
@@ -34,6 +35,13 @@ class ModelFinderApp:
             messagebox.showerror("初始化错误", f"应用程序初始化失败:\n{e}")
             self.root.destroy() # Close window if init fails badly
             sys.exit(1) # Exit the script
+
+    def _on_close(self):
+        try:
+            if getattr(self, "controller", None):
+                self.controller.shutdown()
+        finally:
+            self.root.destroy()
 
 def main():
     """Sets up and runs the application."""

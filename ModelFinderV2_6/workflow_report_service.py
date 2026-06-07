@@ -10,16 +10,53 @@ from .operation_result import OperationResult
 logger = logging.getLogger(__name__)
 
 
-MISSING_FILES_HEADERS = [
-    "\u5e8f\u53f7",
-    "\u8282\u70b9ID",
-    "\u8282\u70b9\u7c7b\u578b",
-    "\u6587\u4ef6\u540d",
-    "\u72b6\u6001",
-    "\u4e0b\u8f7d\u94fe\u63a5",
-    "\u955c\u50cf\u94fe\u63a5",
-    "\u641c\u7d22\u94fe\u63a5",
+COL_SEQ = "\u5e8f\u53f7"
+COL_NODE_ID = "\u8282\u70b9ID"
+COL_NODE_TYPE = "\u8282\u70b9\u7c7b\u578b"
+COL_FILE = "\u6587\u4ef6\u540d"
+COL_STATUS = "\u72b6\u6001"
+COL_DOWNLOAD = "\u4e0b\u8f7d\u94fe\u63a5"
+COL_MIRROR = "\u955c\u50cf\u94fe\u63a5"
+COL_SEARCH = "\u641c\u7d22\u94fe\u63a5"
+COL_REMOTE_FILE = "\u4e91\u7aef\u6587\u4ef6\u540d"
+COL_ORIGINAL_FILE = "\u539f\u59cb\u6587\u4ef6\u540d"
+COL_NORMALIZED_FILE = "\u89c4\u8303\u5316\u6587\u4ef6\u540d"
+COL_ACTUAL_SEARCH_TERM = "\u5b9e\u9645\u641c\u7d22\u8bcd"
+COL_HIT_SOURCE = "\u547d\u4e2d\u6765\u6e90"
+COL_HIT_TITLE = "\u547d\u4e2d\u6807\u9898"
+COL_HIT_LINK = "\u547d\u4e2d\u94fe\u63a5"
+COL_HIT_IDENTIFIER = "\u5173\u952e\u6587\u4ef6\u540d\u6216Repo\u8def\u5f84"
+COL_MATCH_REASON = "\u5339\u914d\u7406\u7531"
+COL_CONFIDENCE = "\u7f6e\u4fe1\u5ea6"
+COL_SUSPICIOUS = "\u53ef\u7591\u6807\u8bb0"
+COL_SUSPICIOUS_REASON = "\u53ef\u7591\u539f\u56e0"
+
+MATCH_EVIDENCE_HEADERS = [
+    COL_ORIGINAL_FILE,
+    COL_NORMALIZED_FILE,
+    COL_ACTUAL_SEARCH_TERM,
+    COL_HIT_SOURCE,
+    COL_HIT_TITLE,
+    COL_HIT_LINK,
+    COL_HIT_IDENTIFIER,
+    COL_MATCH_REASON,
+    COL_CONFIDENCE,
+    COL_SUSPICIOUS,
+    COL_SUSPICIOUS_REASON,
 ]
+
+
+MISSING_FILES_HEADERS = [
+    COL_SEQ,
+    COL_NODE_ID,
+    COL_NODE_TYPE,
+    COL_FILE,
+    COL_STATUS,
+    COL_DOWNLOAD,
+    COL_MIRROR,
+    COL_SEARCH,
+    COL_REMOTE_FILE,
+] + MATCH_EVIDENCE_HEADERS
 
 BATCH_SUMMARY_HEADERS = [
     "\u5de5\u4f5c\u6d41\u6587\u4ef6",
@@ -82,14 +119,26 @@ class WorkflowReportService:
                     search_link_url = f"https://www.bing.com/search?q={query_param}"
                     writer.writerow(
                         {
-                            MISSING_FILES_HEADERS[0]: index,
-                            MISSING_FILES_HEADERS[1]: row["node_id"],
-                            MISSING_FILES_HEADERS[2]: row["node_type"],
-                            MISSING_FILES_HEADERS[3]: row["original_file_path"],
-                            MISSING_FILES_HEADERS[4]: "",
-                            MISSING_FILES_HEADERS[5]: "",
-                            MISSING_FILES_HEADERS[6]: "",
-                            MISSING_FILES_HEADERS[7]: search_link_url,
+                            COL_SEQ: index,
+                            COL_NODE_ID: row["node_id"],
+                            COL_NODE_TYPE: row["node_type"],
+                            COL_FILE: row["original_file_path"],
+                            COL_STATUS: "",
+                            COL_DOWNLOAD: "",
+                            COL_MIRROR: "",
+                            COL_SEARCH: search_link_url,
+                            COL_REMOTE_FILE: "",
+                            COL_ORIGINAL_FILE: row["original_file_path"],
+                            COL_NORMALIZED_FILE: row["name_for_decision"],
+                            COL_ACTUAL_SEARCH_TERM: site_query,
+                            COL_HIT_SOURCE: "",
+                            COL_HIT_TITLE: "",
+                            COL_HIT_LINK: "",
+                            COL_HIT_IDENTIFIER: "",
+                            COL_MATCH_REASON: "",
+                            COL_CONFIDENCE: "",
+                            COL_SUSPICIOUS: "",
+                            COL_SUSPICIOUS_REASON: "",
                         }
                     )
         except Exception:
