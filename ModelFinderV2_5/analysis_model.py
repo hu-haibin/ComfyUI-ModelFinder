@@ -5,6 +5,9 @@ import csv
 import re
 import logging
 import random
+import shutil
+import tempfile
+from urllib.parse import quote_plus
 
 # Import utilities and file manager directly, as Model handles core logic
 from .utils import get_mirror_link, create_html_view, find_chrome_path
@@ -46,6 +49,7 @@ class AnalysisModel:
         
         logger.info("AnalysisModel initialized.")
         self._chinese_char_pattern = re.compile(r'[\u4e00-\u9fff]')
+        self._max_search_term_length = 180
         if pd is None:
             logger.error("Pandas library is not installed, search/batch functionality might be affected.")
         if ChromiumPage is None:
@@ -143,24 +147,56 @@ class AnalysisModel:
         if not isinstance(text, str): return False
         return bool(self._chinese_char_pattern.search(text))
 
+    def _prepare_search_term(self, term):
+        """Normalize and cap search terms so malformed workflow values cannot create oversized requests."""
+        if term is None:
+            return ''
+        prepared = re.sub(r'\s+', ' ', str(term)).strip()
+        if len(prepared) > self._max_search_term_length:
+            logger.warning(
+                "Search term is too long; truncating from %s to %s chars: %r",
+                len(prepared),
+                self._max_search_term_length,
+                prepared[:80]
+            )
+            prepared = prepared[:self._max_search_term_length].strip()
+        return prepared
+
     def _get_search_url(self, name_for_decision, term_for_query_embedding, node_type=None):
         """
         Generates search URLs.
         name_for_decision: Name after mapping, before prefix removal. Used for search strategy.
         term_for_query_embedding: Final term (after mapping and prefix removal) to be embedded in the site query.
         """
-        logger.debug(f"Generating search URL. Decision Name: '{name_for_decision}', Query Embedding Term: '{term_for_query_embedding}', Node Type: {node_type}")
+        safe_query_term = self._prepare_search_term(term_for_query_embedding)
+        logger.debug(f"Generating search URL. Decision Name: '{name_for_decision}', Query Embedding Term: '{safe_query_term}', Node Type: {node_type}")
 
         if name_for_decision == "ip-adapter.bin" and node_type == "InstantIDModelLoader": # 特殊规则判断
              logger.debug("Applying special rule for ip-adapter.bin + InstantIDModelLoader")
              return ("https://www.bing.com/?setlang=en-US", 'site:huggingface.co "ip-adapter.bin InstantID"')
 
         if self._contains_chinese(name_for_decision): # 用映射后的名称（但未移除中文前缀的）判断是否搜LibLib
-            logger.debug(f"Decision name '{name_for_decision}' suggests Chinese model, using LibLib search with query term '{term_for_query_embedding}'.")
-            return f"https://www.bing.com/?setlang=en-US", f'site:liblib.art "{term_for_query_embedding}"'
+            logger.debug(f"Decision name '{name_for_decision}' suggests Chinese model, using LibLib search with query term '{safe_query_term}'.")
+            return f"https://www.bing.com/?setlang=en-US", f'site:liblib.art "{safe_query_term}"'
         else:
-            logger.debug(f"Decision name '{name_for_decision}' suggests non-Chinese model, using Hugging Face search with query term '{term_for_query_embedding}'.")
-            return f"https://www.bing.com/?setlang=en-US", f'site:huggingface.co "{term_for_query_embedding}"'
+            logger.debug(f"Decision name '{name_for_decision}' suggests non-Chinese model, using Hugging Face search with query term '{safe_query_term}'.")
+            return f"https://www.bing.com/?setlang=en-US", f'site:huggingface.co "{safe_query_term}"'
+
+    def _is_request_header_too_long_page(self, page):
+        try:
+            page_text = f"{page.title or ''}\n{page.html or ''}".lower()
+            return 'header field too long' in page_text or (
+                'http error 400' in page_text and 'request header' in page_text
+            )
+        except Exception:
+            return False
+
+    def _reset_search_browser_state(self, page):
+        try:
+            page.clear_cache(session_storage=True, local_storage=True, cache=True, cookies=True)
+            logger.info("Cleared browser cache and cookies for search session.")
+        except Exception:
+            logger.warning("Failed to clear search browser cache/cookies.", exc_info=True)
 
     def find_missing_models(self, workflow_file):
         logger.info(f"Analyzing workflow file: {workflow_file}")
@@ -264,7 +300,7 @@ class AnalysisModel:
                         csv_item['name_for_query_embedding'],
                         csv_item['node_type']
                     )
-                    query_param = site_query.replace(' ', '+').replace('"', '%22')
+                    query_param = quote_plus(site_query)
                     search_link_url = f"https://www.bing.com/search?q={query_param}"
                     writer.writerow({
                         '序号': i, '节点ID': csv_item['node_id'], '节点类型': csv_item['node_type'],
@@ -316,13 +352,19 @@ class AnalysisModel:
                 logger.error("Chrome browser not found. Cannot perform search.");
             
             page = None
+            browser_tmp_dir = None
             if chrome_path_to_use and search_tasks: # 仅当需要搜索且浏览器存在时初始化
-                co = ChromiumOptions().set_browser_path(chrome_path_to_use)
+                browser_tmp_dir = tempfile.mkdtemp(prefix="model_finder_search_")
+                co = ChromiumOptions(read_file=False).set_browser_path(chrome_path_to_use)
+                co.set_tmp_path(browser_tmp_dir).auto_port()
+                co.set_cache_path(os.path.join(browser_tmp_dir, "cache"))
                 co.set_argument('--disable-infobars').set_argument('--no-sandbox').set_argument('--start-maximized')
+                co.set_argument('--no-first-run').set_argument('--no-default-browser-check')
                 # co.set_argument('--headless')
                 try:
                     page = ChromiumPage(co)
-                    logger.info("Browser page initialized.")
+                    self._reset_search_browser_state(page)
+                    logger.info("Browser page initialized with isolated temporary profile: %s", browser_tmp_dir)
                 except Exception as browser_e:
                     logger.error(f"Failed to initialize browser: {browser_e}")
                     page = None # 确保page为None，后续不会尝试使用
@@ -336,17 +378,40 @@ class AnalysisModel:
                     bing_url, site_query = self._get_search_url(task['name_for_decision'], task['search_term_query'], task['node_type'])
                     df_idx = task['df_index']
                     try:
-                        page.get(bing_url, timeout=15)
-                        time.sleep(random.uniform(0.5,1.0)) # 减少等待
-                        search_box = page.ele("#sb_form_q", timeout=5)
-                        if not search_box: df.loc[df_idx, '状态'] = '搜索错误(无搜索框)'; continue
-                        search_box.clear(); search_box.input(site_query)
-                        time.sleep(random.uniform(0.2,0.5))
-                        
-                        s_button = page.ele('#search_icon',timeout=3) or page.ele('xpath://button[@type="submit"]', timeout=3)
-                        if s_button: s_button.click()
-                        else: page.run_js("document.querySelector('#sb_form').submit();")
-                        page.wait.load_start(timeout=10)
+                        for attempt in range(2):
+                            if attempt:
+                                logger.info("Retrying Bing search after clearing browser state: %s", site_query)
+                                self._reset_search_browser_state(page)
+
+                            page.get(bing_url, timeout=15)
+                            if self._is_request_header_too_long_page(page):
+                                if attempt == 0:
+                                    continue
+                                df.loc[df_idx, '状态'] = '搜索错误(Bing请求头过长)'
+                                break
+
+                            time.sleep(random.uniform(0.5,1.0)) # 减少等待
+                            search_box = page.ele("#sb_form_q", timeout=5)
+                            if not search_box:
+                                df.loc[df_idx, '状态'] = '搜索错误(无搜索框)'
+                                break
+                            search_box.clear(); search_box.input(site_query)
+                            time.sleep(random.uniform(0.2,0.5))
+
+                            s_button = page.ele('#search_icon',timeout=3) or page.ele('xpath://button[@type="submit"]', timeout=3)
+                            if s_button: s_button.click()
+                            else: page.run_js("document.querySelector('#sb_form').submit();")
+                            page.wait.load_start(timeout=10)
+
+                            if self._is_request_header_too_long_page(page):
+                                if attempt == 0:
+                                    continue
+                                df.loc[df_idx, '状态'] = '搜索错误(Bing请求头过长)'
+                                break
+                            break
+
+                        if df.loc[df_idx, '状态'] in ['搜索错误(Bing请求头过长)', '搜索错误(无搜索框)']:
+                            continue
 
                         results_container = page.ele('#b_results', timeout=10)
                         if not results_container: df.loc[df_idx, '状态'] = '未找到(无结果区)'; continue
@@ -405,7 +470,13 @@ class AnalysisModel:
                     finally:
                         df.to_csv(csv_file, index=False, encoding='utf-8-sig') # Save after each
                         time.sleep(random.uniform(0.8, 1.8)) # Shorter delay
-                if page: page.quit()
+            if page:
+                try:
+                    page.quit()
+                except Exception:
+                    logger.warning("Failed to quit search browser cleanly.", exc_info=True)
+            if browser_tmp_dir:
+                shutil.rmtree(browser_tmp_dir, ignore_errors=True)
 
             df.to_csv(csv_file, index=False, encoding='utf-8-sig')
             html_file = create_html_view(csv_file)
