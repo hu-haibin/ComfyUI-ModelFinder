@@ -1,9 +1,0 @@
-﻿序号,节点ID,节点类型,文件名,状态,下载链接,镜像链接,搜索链接
-1,40,LoraLoaderModelOnly,AWPortrait CN_1.0.safetensors,已处理,https://huggingface.co/jackzheng/flux-fill-FP8/resolve/main/AWPortrait%20CN_1.0.safetensors,https://hf-mirror.com/jackzheng/flux-fill-FP8/resolve/main/AWPortrait%20CN_1.0.safetensors,
-2,63,VAELoader,ae.safetensors,已处理,https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/ae.safetensors,https://hf-mirror.com/black-forest-labs/FLUX.1-schnell/resolve/main/ae.safetensors,
-3,58,DualCLIPLoader,clip_l.safetensors,已处理,https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors,https://hf-mirror.com/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors,
-4,33,CheckpointLoaderSimple,flux1-dev-fp8.safetensors,已处理,https://huggingface.co/Kijai/flux-fp8/resolve/main/flux1-dev-fp8.safetensors,https://hf-mirror.com/Kijai/flux-fp8/resolve/main/flux1-dev-fp8.safetensors,
-5,59,UNETLoader,flux1-fill-dev.safetensors,已处理,https://huggingface.co/camenduru/FLUX.1-dev/resolve/main/flux1-fill-dev.safetensors,https://hf-mirror.com/camenduru/FLUX.1-dev/resolve/main/flux1-fill-dev.safetensors,
-6,56,StyleModelLoader,flux1-redux-dev.safetensors,已处理,https://huggingface.co/Runware/FLUX.1-Redux-dev/resolve/main/flux1-redux-dev.safetensors,https://hf-mirror.com/Runware/FLUX.1-Redux-dev/resolve/main/flux1-redux-dev.safetensors,
-7,57,CLIPVisionLoader,sigclip_vision_patch14_384.safetensors,已处理,https://huggingface.co/Comfy-Org/sigclip_vision_384/resolve/main/sigclip_vision_patch14_384.safetensors,https://hf-mirror.com/Comfy-Org/sigclip_vision_384/resolve/main/sigclip_vision_patch14_384.safetensors,
-8,58,DualCLIPLoader,t5xxl_fp8_e4m3fn.safetensors,已处理,https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors,https://hf-mirror.com/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors,

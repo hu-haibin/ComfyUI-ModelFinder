@@ -1,7 +1,0 @@
-﻿序号,节点ID,节点类型,文件名,状态,下载链接,镜像链接,搜索链接
-1,82,IPAdapterFluxLoader,InstantX-F.1-dev-IP-Adapter.bin,,,,https://www.bing.com/search?q=site:huggingface.co+%22InstantX-F.1-dev-IP-Adapter.bin%22
-2,9,VAELoader,ae.sft,,,,https://www.bing.com/search?q=site:huggingface.co+%22ae.sft%22
-3,8,DualCLIPLoader,clip_l,,,,https://www.bing.com/search?q=site:huggingface.co+%22clip_l%22
-4,82,IPAdapterFluxLoader,siglip-so400m-patch14-384,,,,https://www.bing.com/search?q=site:huggingface.co+%22siglip-so400m-patch14-384%22
-5,8,DualCLIPLoader,t5xxl_fp8_e4m3fn,,,,https://www.bing.com/search?q=site:huggingface.co+%22t5xxl_fp8_e4m3fn%22
-6,7,UNETLoader,基础算法_F.1,,,,https://www.bing.com/search?q=site:liblib.art+%22F.1基础算法模型%22

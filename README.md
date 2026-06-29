@@ -1,6 +1,69 @@
-# ModelFinder V2.5
+# ModelFinder
 
-ModelFinder是一个用于ComfyUI的模型管理工具，可以帮助您检测缺失模型、自动搜索下载链接，并提供智能的模型管理功能。
+ModelFinder是一个用于管理和分析ComfyUI工作流模型的工具，可帮助您查找缺失的模型并管理模型库。
+
+## 项目结构
+
+项目采用前后端分离架构：
+
+- **前端(frontend/)**: 使用Flutter开发的跨平台UI界面
+- **后端(ModelFinderV2_5/)**: 使用Python开发的业务逻辑和API服务
+
+## 系统需求
+
+- **Python**: 3.8或更高版本
+- **Flutter**: 最新的稳定版本
+- **操作系统**: Windows 10/11
+
+## 快速开始
+
+### 方法1: 一键启动（推荐）
+
+双击运行项目根目录中的`start_modelfinder.bat`，它将自动：
+1. 检查Python和Flutter环境
+2. 安装必要的Python依赖
+3. 启动后端API服务器
+4. 启动前端Flutter应用
+
+### 方法2: 分别启动
+
+如果需要单独启动前端或后端：
+
+**启动后端:**
+```bash
+cd ModelFinderV2_5
+python -m pip install -r requirements.txt
+python api_server.py
+```
+
+**启动前端:**
+```bash
+cd frontend
+flutter pub get
+flutter run -d windows
+```
+
+## 功能介绍
+
+- **工作流分析**: 分析ComfyUI工作流文件，查找缺失的模型
+- **批量处理**: 一次处理多个工作流文件
+- **模型管理**: 移动、复制和组织模型文件
+- **不规则名称映射**: 管理模型名称的特殊映射规则
+- **配置管理**: 自定义节点类型、模型索引和文件扩展名
+
+## 故障排除
+
+如果遇到问题：
+
+1. **后端启动失败**: 检查Python是否已安装，并确保已安装所有依赖
+2. **前端启动失败**: 确保Flutter环境正确配置
+3. **API错误**: 确保后端服务器正在运行（默认在http://localhost:5000）
+
+## 开发信息
+
+- 前端: Flutter/Dart
+- 后端: Python/Flask
+- 通信: HTTP REST API
 
 ## 主要功能
 

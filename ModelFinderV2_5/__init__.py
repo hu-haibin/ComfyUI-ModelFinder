@@ -4,5 +4,9 @@
 版本：2.5
 """
 
-__version__ = "2.6"
+__version__ = "2.5.0"
 __author__ = "wangdefa4567"
+
+"""
+ModelFinder - A tool for ComfyUI workflow model analysis and management.
+"""

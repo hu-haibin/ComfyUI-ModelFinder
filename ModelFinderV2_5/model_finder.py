@@ -2,8 +2,15 @@
 
 import sys
 import tkinter as tk
-from tkinter import messagebox # Keep for fallback error
+from tkinter import messagebox  # Keep for fallback error
 import ttkbootstrap as ttk
+import logging
+
+# 导入日志配置
+from .logger_config import setup_logger
+
+# 设置日志系统
+logger = setup_logger(logging.DEBUG)
 
 # Import Controller and View
 from .controller import AppController
@@ -29,8 +36,7 @@ class ModelFinderApp:
             self.controller.initialize()
 
         except Exception as e:
-            import logging
-            logging.error("Error during ModelFinderApp Initialization", exc_info=True)
+            logger.error("Error during ModelFinderApp Initialization", exc_info=True)
             messagebox.showerror("初始化错误", f"应用程序初始化失败:\n{e}")
             self.root.destroy() # Close window if init fails badly
             sys.exit(1) # Exit the script
@@ -44,10 +50,9 @@ def main():
         app = ModelFinderApp(root)
         root.mainloop()
     except Exception as e:
-        import logging
         # Fallback error handling if GUI fails catastrophically
         error_msg = f"程序启动失败: {type(e).__name__}: {str(e)}"
-        logging.critical(error_msg, exc_info=True)
+        logger.critical(error_msg, exc_info=True)
         
         # Try to show a simple Tkinter error box if possible
         try:
@@ -59,7 +64,7 @@ def main():
                  messagebox.showerror("启动错误", error_msg)
                  tk_root.destroy()
         except Exception as me:
-             print(f"无法显示启动错误消息框: {me}")
+             logger.error(f"无法显示启动错误消息框: {me}")
         finally:
             print("\n如果遇到问题，请检查依赖是否都已安装。")
             input("按Enter键退出...")

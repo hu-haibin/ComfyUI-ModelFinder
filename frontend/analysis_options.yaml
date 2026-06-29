@@ -1,0 +1,78 @@
+# This file configures the analyzer, which statically analyzes Dart code to
+# check for errors, warnings, and lints.
+#
+# The issues identified by the analyzer are surfaced in the UI of Dart-enabled
+# IDEs (https://dart.dev/tools#ides-and-editors). The analyzer can also be
+# invoked from the command line by running `flutter analyze`.
+
+# The following line activates a set of recommended lints for Flutter apps,
+# packages, and plugins designed to encourage good coding practices.
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  # Optional: You can exclude generated files from analysis if they produce too many warnings
+  # that you don't want to address directly in the generated code.
+  # exclude:
+  #   - '**/*.g.dart' # Example for excluding generated files by build_runner
+  #   - '**/*.freezed.dart'
+  errors:
+    # You can treat certain lints as errors to enforce them more strictly.
+    # For example, to treat missing required parameters as an error:
+    # missing_required_param: error
+    # unused_local_variable: warning # Default, but can be made 'error' or 'info'
+    # dead_code: error # Treat dead code as an error
+
+linter:
+  # The lint rules applied to this project can be customized in the
+  # section below to disable rules from the `package:flutter_lints/flutter.yaml`
+  # included above or to enable additional rules. A list of all available lints
+  # and their documentation is published at https://dart.dev/lints.
+  rules:
+    # --- Style & Readability Enhancements ---
+    # prefer_single_quotes: true # Uncomment if your team prefers single quotes for strings
+    always_declare_return_types: true
+    always_put_required_named_parameters_first: true
+    avoid_returning_null_for_void: true # Use void for functions that don't return a value
+    avoid_unused_constructor_parameters: true
+    # prefer_final_fields: true # Already in flutter_lints, good to be aware of
+    # prefer_final_locals: true # Already in flutter_lints
+    # unnecessary_this: true # Already in flutter_lints
+    # prefer_interpolation_to_compose_strings: true # Already in flutter_lints
+    # prefer_collection_literals: true # Already in flutter_lints (usually)
+    # use_key_in_widget_constructors: true # Already in flutter_lints, very important
+
+    # --- Potential Bug Prevention & Best Practices ---
+    # cancel_subscriptions: true # Ensure StreamSubscriptions are cancelled
+    # close_sinks: true # Ensure Sinks are closed
+    # test_types_in_equals: true # More robust equals method implementation
+    # throw_in_finally: true # Avoid throwing exceptions from finally blocks
+    # unawaited_futures: error # Treat unawaited futures as errors (flutter_lints has it as a warning)
+    # use_build_context_synchronously: error # Treat async gaps with BuildContext as errors (flutter_lints has it as a warning)
+    
+    # --- Documentation ---
+    # package_api_docs: true # Encourages documenting public APIs of your package/library
+    # public_member_api_docs: true # Stricter: all public members should be documented (consider starting with package_api_docs)
+
+    # --- Others to consider based on team preference ---
+    # lines_longer_than_80_chars: true # If you want to enforce a line length limit (IDE can usually format this)
+    # sort_constructors_first: true
+    # sort_unnamed_constructors_first: true
+    # omit_local_variable_types: false # Set to true if you prefer `var` for locals when type is obvious, false to always be explicit. flutter_lints leans towards `var`.
+
+    # Example: Disabling a rule from flutter_lints if needed
+    # avoid_print: false # Only if print statements are intentionally kept for specific debug builds
+
+    # --- Rules that might be particularly beneficial for your project's current state ---
+    # (after our refactoring, ensuring these are active helps maintain quality)
+    
+    # For cleaner code and potentially fewer bugs:
+    prefer_if_null_operators: true
+    prefer_conditional_assignment: true
+    prefer_spread_collections: true
+    
+    # If you are creating classes that will be extended or implemented:
+    # avoid_renaming_method_parameters: true # Helps when overriding methods
+
+    # If you are using Streams/Sinks extensively, uncomment these:
+    # cancel_subscriptions: true
+    # close_sinks: true

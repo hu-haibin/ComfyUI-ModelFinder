@@ -1,3 +1,0 @@
-﻿序号,节点ID,节点类型,文件名,状态,下载链接,镜像链接,搜索链接
-1,416,Upscale Model Loader,RealESRGAN_x2.pth,已处理,https://huggingface.co/ai-forever/Real-ESRGAN/resolve/main/RealESRGAN_x2.pth,https://hf-mirror.com/ai-forever/Real-ESRGAN/resolve/main/RealESRGAN_x2.pth,
-2,370,CheckpointLoaderSimple,maximumEffort_maximumEffortXLV10.safetensors,未找到,,,https://www.bing.com/search?q=site:huggingface.co+%22maximumEffort_maximumEffortXLV10.safetensors%22

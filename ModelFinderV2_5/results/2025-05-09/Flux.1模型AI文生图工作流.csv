@@ -1,5 +1,0 @@
-﻿序号,节点ID,节点类型,文件名,状态,下载链接,镜像链接,搜索链接
-1,81,LoraLoader,F.1-小红书风格_最强网感｜穿搭 | 光效 | 彩妆_穿搭2.0,已处理,,,https://www.liblib.art/modelinfo/62db9235ba8e4f7d885956429b009e8e?versionUuid=4d3ea35e6a604001ac04b2af12ca503b
-2,58,LoraLoader,Flux.1 珊瑚宫心海 - 人鱼水精灵礼服真人cos - 原神_v1.0.safetensors,已处理,,,https://www.liblib.art/modelinfo/2cfd45f60bf644b09d580e2a6ca122a8?versionUuid=6d70147f65814e89a6209748657a94fd
-3,83,CheckpointLoaderSimple,flux1-dev-fp8.safetensors,已处理,https://huggingface.co/Kijai/flux-fp8/resolve/main/flux1-dev-fp8.safetensors,https://hf-mirror.com/Kijai/flux-fp8/resolve/main/flux1-dev-fp8.safetensors,
-4,80,LoraLoader,北岸-韩国精致甜辣妹脸模-允芷_v1.safetensors,未找到,,,https://www.bing.com/search?q=site:liblib.art+%22北岸-韩国精致甜辣妹脸模-允芷_v1.safetensors%22

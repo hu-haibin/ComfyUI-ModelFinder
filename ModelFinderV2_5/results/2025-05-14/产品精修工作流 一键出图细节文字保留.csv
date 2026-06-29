@@ -1,8 +1,0 @@
-﻿序号,节点ID,节点类型,文件名,状态,下载链接,镜像链接,搜索链接
-1,174,LayerMask: LoadBiRefNetModel,BiRefNet-general-epoch_244.pth,已处理,https://huggingface.co/yiwangsimple/BiRefNet-general-epoch_244/resolve/main/BiRefNet-general-epoch_244.pth,https://hf-mirror.com/yiwangsimple/BiRefNet-general-epoch_244/resolve/main/BiRefNet-general-epoch_244.pth,
-2,172,easy hiresFix,R-ESRGAN_4x+,已处理,https://huggingface.co/qualcomm/Real-ESRGAN-x4plus,https://hf-mirror.com/qualcomm/Real-ESRGAN-x4plus,
-3,155,VAELoader,ae.sft,已处理,https://huggingface.co/black-forest-labs/FLUX.1-schnell/discussions/28,https://hf-mirror.com/black-forest-labs/FLUX.1-schnell/discussions/28,
-4,154,DualCLIPLoader,clip_l,已处理,https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors,https://hf-mirror.com/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors,
-5,154,DualCLIPLoader,t5xxl_fp8_e4m3fn,已处理,https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors,https://hf-mirror.com/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors,
-6,152,UNETLoader,基础算法_F.1,已处理,,,https://www.liblib.art/modelinfo/488cd9d58cd4421b9e8000373d7da123
-7,163,LoraLoader,渲染不求人-商业写实产品拍摄渲染 产品精修_渲染不求人,已处理,,,https://www.liblib.art/modelinfo/e5604e02cca44f0cb8ceeca0359447d3?versionUuid=b54eed5cdd71420bb70beb3337b4d59c

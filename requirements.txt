@@ -1,3 +1,0 @@
-DrissionPage==4.1.0.18
-pandas==2.2.3
-ttkbootstrap==1.10.1

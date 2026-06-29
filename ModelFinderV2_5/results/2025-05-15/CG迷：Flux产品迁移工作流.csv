@@ -1,7 +1,0 @@
-﻿序号,节点ID,节点类型,文件名,状态,下载链接,镜像链接,搜索链接
-1,26,VAELoader,FLUX.1-vae.sft,已处理,https://huggingface.co/black-forest-labs/FLUX.1-schnell/discussions/28,https://hf-mirror.com/black-forest-labs/FLUX.1-schnell/discussions/28,
-2,13,DualCLIPLoader,clip_l.safetensors,已处理,https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors,https://hf-mirror.com/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors,
-3,11,UNETLoader,flux1-fill-FP8_v10.safetensors,已处理,https://huggingface.co/jackzheng/flux-fill-FP8/resolve/main/fluxFillFP8_v10.safetensors,https://hf-mirror.com/jackzheng/flux-fill-FP8/resolve/main/fluxFillFP8_v10.safetensors,
-4,19,StyleModelLoader,flux1-redux-dev.safetensors,已处理,https://huggingface.co/Runware/FLUX.1-Redux-dev/resolve/main/flux1-redux-dev.safetensors,https://hf-mirror.com/Runware/FLUX.1-Redux-dev/resolve/main/flux1-redux-dev.safetensors,
-5,23,CLIPVisionLoader,sigclip_vision_patch14_384.safetensors,已处理,https://huggingface.co/Comfy-Org/sigclip_vision_384/resolve/main/sigclip_vision_patch14_384.safetensors,https://hf-mirror.com/Comfy-Org/sigclip_vision_384/resolve/main/sigclip_vision_patch14_384.safetensors,
-6,13,DualCLIPLoader,t5xxl_fp8_e4m3fn.safetensors,已处理,https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors,https://hf-mirror.com/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors,

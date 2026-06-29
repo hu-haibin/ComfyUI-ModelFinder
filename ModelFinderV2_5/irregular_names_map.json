@@ -58,5 +58,23 @@
     "original_name": "ae.safetensors",
     "corrected_name": "flux vae.safetensors",
     "notes": ""
+  },
+  {
+    "id": "eaa141ee-fe59-4e72-9228-7a4c7303c3c2",
+    "original_name": "万享XL进阶版_V80（正式版推出）_V8.0.safetensors",
+    "corrected_name": "万享XL进阶版",
+    "notes": ""
+  },
+  {
+    "id": "c0e43ed7-b927-4e99-af66-ec44e76dec31",
+    "original_name": "筑梦工业 _ 合约组织XL_v1.0.safetensors",
+    "corrected_name": "筑梦工业 合约组织",
+    "notes": ""
+  },
+  {
+    "id": "e1a70faa-2479-4546-84cd-314fd56c0aca",
+    "original_name": "筑梦工业 _ 表情大师XL_v1.0.safetensors",
+    "corrected_name": "筑梦工业 表情大师XL",
+    "notes": ""
   }
 ]

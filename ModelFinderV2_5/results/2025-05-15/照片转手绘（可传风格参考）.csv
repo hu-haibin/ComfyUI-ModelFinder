@@ -1,7 +1,0 @@
-﻿序号,节点ID,节点类型,文件名,状态,下载链接,镜像链接,搜索链接
-1,7,UNETLoader,F.1基础算法模型-哩布在线可运行_F.1-dev-fp8.safetensors,已处理,,,https://www.liblib.art/modelinfo/488cd9d58cd4421b9e8000373d7da123
-2,82,IPAdapterFluxLoader,InstantX-F.1-dev-IP-Adapter.bin,已处理,https://huggingface.co/InstantX/FLUX.1-dev-IP-Adapter,https://hf-mirror.com/InstantX/FLUX.1-dev-IP-Adapter,
-3,9,VAELoader,ae.safetensors,已处理,https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/ae.safetensors,https://hf-mirror.com/black-forest-labs/FLUX.1-schnell/resolve/main/ae.safetensors,
-4,8,DualCLIPLoader,clip_l.safetensors,已处理,https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors,https://hf-mirror.com/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors,
-5,82,IPAdapterFluxLoader,siglip-so400m-patch14-384,已处理,https://huggingface.co/google/siglip-so400m-patch14-384,https://hf-mirror.com/google/siglip-so400m-patch14-384,
-6,8,DualCLIPLoader,t5xxl_fp8_e4m3fn.safetensors,已处理,https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors,https://hf-mirror.com/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors,

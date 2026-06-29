@@ -1,6 +1,0 @@
-﻿序号,节点ID,节点类型,文件名,状态,下载链接,镜像链接,搜索链接
-1,"2,6",Joy_caption_two_load,Meta-Llama-3.1-8B-Instruct-bnb-4bit,已处理,https://huggingface.co/unsloth/Meta-Llama-3.1-8B-bnb-4bit,https://hf-mirror.com/unsloth/Meta-Llama-3.1-8B-bnb-4bit,
-2,33,VAELoader,ae.safetensors,已处理,https://huggingface.co/StableDiffusionVN/Flux/resolve/main/Vae/flux_vae.safetensors,https://hf-mirror.com/StableDiffusionVN/Flux/resolve/main/Vae/flux_vae.safetensors,
-3,12,DualCLIPLoaderGGUF,clip_l.safetensors,已处理,https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors,https://hf-mirror.com/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors,
-4,35,LoraLoaderModelOnly,filmfotos.safetensors,已处理,https://huggingface.co/Shakker-Labs/FilmPortrait/resolve/main/filmfotos.safetensors,https://hf-mirror.com/Shakker-Labs/FilmPortrait/resolve/main/filmfotos.safetensors,
-5,30,UnetLoaderGGUF,flux-hyp8-Q5_K_M.gguf,已处理,https://huggingface.co/mhnakif/flux-hyp8-gguf-k/tree/main,https://hf-mirror.com/mhnakif/flux-hyp8-gguf-k/tree/main,

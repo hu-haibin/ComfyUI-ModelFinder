@@ -7,9 +7,9 @@ import logging
 import random
 
 # Import utilities and file manager directly, as Model handles core logic
-from .utils import get_mirror_link, create_html_view, find_chrome_path
-from .file_manager import get_output_path
-from .model_config_manager import ModelConfigManager
+from utils import get_mirror_link, create_html_view, find_chrome_path
+from file_manager import get_output_path
+from model_config_manager import ModelConfigManager
 
 try:
     import pandas as pd
@@ -191,10 +191,19 @@ class AnalysisModel:
                     
                     indices_to_check = node_model_indices.get(node_type, node_model_indices["default"])
                     for index in indices_to_check:
-                        if len(widgets_values) > index and isinstance(widgets_values[index], str):
-                            original_value_from_widget = widgets_values[index].strip()
-                            if not original_value_from_widget or original_value_from_widget.lower() in ["default", "none", "empty", "auto", "off", "on"]: continue
-                            
+                        if len(widgets_values) > index:
+                            # 处理复杂对象格式（如ComfyUI的CheckpointLoader|pysssss节点）
+                            if isinstance(widgets_values[index], dict) and "content" in widgets_values[index]:
+                                original_value_from_widget = widgets_values[index]["content"].strip()
+                            # 处理字符串格式
+                            elif isinstance(widgets_values[index], str):
+                                original_value_from_widget = widgets_values[index].strip()
+                            else:
+                                # 跳过其他格式
+                                continue
+                                
+                            if not original_value_from_widget or original_value_from_widget.lower() in ["default", "none", "empty", "auto", "off", "on", "[none]"]: continue
+                                                    
                             original_filename = os.path.basename(original_value_from_widget.replace('\\', '/')) if '\\' in original_value_from_widget or '/' in original_value_from_widget else original_value_from_widget
                             
                             # 使用 _process_name_for_search 获取处理后的名称
@@ -461,3 +470,49 @@ class AnalysisModel:
         logger.info("Batch processing finished.")
         if not all_missing_dict: return True
         return batch_results_path or summary_all_missing_path or False
+
+class ComfyUIWorkflowAnalyzer:
+    """
+    Wrapper class for AnalysisModel that makes it easier to use in the API.
+    """
+    def __init__(self, workflow_path, model_config=None, irregular_names=None):
+        self.workflow_path = workflow_path
+        self.model_config = model_config
+        self.irregular_names = irregular_names
+        self.analysis_model = AnalysisModel()
+        self.missing_models = []
+        self.html_path = None
+        
+    def analyze(self):
+        """
+        Analyzes the workflow and returns the results.
+        """
+        try:
+            self.missing_models = self.analysis_model.find_missing_models(self.workflow_path)
+            return {
+                "missing_models": self.missing_models,
+                "used_models": []  # TODO: Implement this if needed
+            }
+        except Exception as e:
+            logger.error(f"Error analyzing workflow: {e}", exc_info=True)
+            raise
+            
+    def generate_html_report(self):
+        """
+        Generates an HTML report for the analyzed workflow.
+        """
+        if not self.missing_models:
+            return None
+            
+        basename = os.path.basename(self.workflow_path)
+        csv_path = self.analysis_model.create_csv_file(self.missing_models, basename)
+        if not csv_path:
+            return None
+            
+        try:
+            html_path = self.analysis_model.search_model_links(csv_path)
+            self.html_path = html_path if isinstance(html_path, str) else None
+            return self.html_path
+        except Exception as e:
+            logger.error(f"Error generating HTML report: {e}", exc_info=True)
+            return None

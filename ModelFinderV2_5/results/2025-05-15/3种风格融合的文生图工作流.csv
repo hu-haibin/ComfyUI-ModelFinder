@@ -1,3 +1,0 @@
-﻿序号,节点ID,节点类型,文件名,状态,下载链接,镜像链接,搜索链接
-1,86,UpscaleModelLoader,4x-UltraSharp.pth,已处理,https://huggingface.co/lokCX/4x-Ultrasharp/resolve/main/4x-UltraSharp.pth,https://hf-mirror.com/lokCX/4x-Ultrasharp/resolve/main/4x-UltraSharp.pth,
-2,4,Eff. Loader SDXL,crystalClearXL_ccxl.safetensors,已处理,https://huggingface.co/ckpt/crystalclear-xl/resolve/main/crystalClearXL_ccxl.safetensors,https://hf-mirror.com/ckpt/crystalclear-xl/resolve/main/crystalClearXL_ccxl.safetensors,

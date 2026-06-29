@@ -12,33 +12,42 @@ except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "tqdm"])
     from tqdm import tqdm
 
+# 尝试导入DrissionPage，如果不存在则自动安装
+try:
+    from DrissionPage import ChromiumPage
+except ImportError:
+    print("正在安装 DrissionPage ...")
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "DrissionPage"])
+    from DrissionPage import ChromiumPage
+
 # 定义模型及其下载URL
 MODELS = [
     {
         "name": "google/siglip-so400m-patch14-384",
         "foreign_url": "https://huggingface.co/google/siglip-so400m-patch14-384",
-        "domestic_url": "https://hf-mirror.com/google/siglip-so400m-patch14-384",
+        "domestic_url": "https://hf-mirror.com/google/siglip-so400m-patch14-384/tree/main",
         "target_path": "models/clip/siglip-so400m-patch14-384",
         "download_folder": "siglip-so400m-patch14-384"
     },
     {
         "name": "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit",
         "foreign_url": "https://huggingface.co/unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit",
-        "domestic_url": "https://hf-mirror.com/unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit",
+        "domestic_url": "https://hf-mirror.com/unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit/tree/main",
         "target_path": "models/LLM/Meta-Llama-3.1-8B-Instruct-bnb-4bit",
         "download_folder": "Meta-Llama-3.1-8B-Instruct-bnb-4bit"
     },
     {
         "name": "unsloth/Meta-Llama-3.1-8B-Instruct",
         "foreign_url": "https://huggingface.co/unsloth/Meta-Llama-3.1-8B-Instruct",
-        "domestic_url": "https://hf-mirror.com/unsloth/Meta-Llama-3.1-8B-Instruct",
+        "domestic_url": "https://hf-mirror.com/unsloth/Meta-Llama-3.1-8B-Instruct/tree/main",
         "target_path": "models/LLM/Meta-Llama-3.1-8B-Instruct",
         "download_folder": "Meta-Llama-3.1-8B-Instruct"
     },
     {
         "name": "Joy-Caption-alpha-two",
         "foreign_url": "https://huggingface.co/spaces/fancyfeast/joy-caption-alpha-two/tree/main/cgrkzexw-599808",
-        "domestic_url": "https://huggingface.co/spaces/fancyfeast/joy-caption-alpha-two/tree/main/cgrkzexw-599808",
+        "domestic_url": "https://hf-mirror.com/spaces/fancyfeast/joy-caption-alpha-two/tree/main/cgrkzexw-599808",
         "target_path": "models/Joy_caption_two",
         "download_folder": "joy-caption-alpha-two"
     }
@@ -152,14 +161,28 @@ def move_model_files(download_path, comfyui_path):
         
         print(f"成功移动 {model['name']} 到 {target_dir}")
 
+def open_hf_mirror_links():
+    print("\n正在自动打开所有 hf-mirror 链接，请在浏览器中批量下载文件 ...")
+    page = ChromiumPage()
+    for model in MODELS:
+        url = model['domestic_url']
+        page.new_tab(url)
+    print("已在浏览器中打开所有链接，请批量下载所有文件。\n下载完成后回到此窗口继续。")
+    input("下载完成后按回车继续 ...")
+    page.quit()
+
 def main():
     # 首先显示下载链接
     print_download_links()
     
-    # 询问用户是否要继续移动文件
-    proceed = input("是否继续移动下载的文件? (y/n): ").strip().lower()
+    proceed = input("是否自动打开下载页面? (y/n): ").strip().lower()
+    if proceed == 'y':
+        open_hf_mirror_links()
+    else:
+        print("您选择不自动打开下载页面，请手动下载模型文件。")
     
-    if proceed != 'y':
+    proceed_move = input("是否继续移动下载的文件? (y/n): ").strip().lower()
+    if proceed_move != 'y':
         print("退出。当您准备好移动文件时，可以再次运行此脚本。")
         return
     

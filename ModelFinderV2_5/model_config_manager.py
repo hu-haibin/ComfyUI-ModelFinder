@@ -209,8 +209,8 @@ class ModelConfigManager:
         logger.info(f"已删除节点类型: {node_type}")
         return self._save_config()
     
-    def remove_node_model_index(self, node_type: str) -> bool:
-        """删除指定节点类型的模型索引映射。"""
+    def remove_node_model_index(self, node_type: str, index: int) -> bool:
+        """删除指定节点类型的特定模型索引。"""
         if not node_type or not isinstance(node_type, str):
             logger.error(f"无效的节点类型: {node_type}")
             return False
@@ -220,12 +220,23 @@ class ModelConfigManager:
             return True
         
         if node_type == "default":
-            logger.error("不能删除默认节点索引映射")
+            logger.error("不能修改默认节点索引映射")
             return False
         
-        del self._config['node_model_indices'][node_type]
-        logger.info(f"已删除节点索引映射: {node_type}")
-        return self._save_config()
+        indices = self._config['node_model_indices'][node_type]
+        if index in indices:
+            indices.remove(index)
+            logger.info(f"已从节点 {node_type} 中删除索引: {index}")
+            
+            # 如果列表为空，删除整个映射
+            if not indices:
+                del self._config['node_model_indices'][node_type]
+                logger.info(f"已删除空节点索引映射: {node_type}")
+            
+            return self._save_config()
+        else:
+            logger.warning(f"节点 {node_type} 中不存在索引: {index}")
+            return False
     
     def remove_model_extension(self, extension: str) -> bool:
         """删除一个模型文件扩展名。"""
