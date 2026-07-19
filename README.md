@@ -2,36 +2,33 @@
 
 <div align="center">
 
-# ComfyUI-ModelFinder
+# Looking for the maintained ComfyUI launcher?
 
-### Legacy open-source Python tool for finding missing ComfyUI models.
+### Download Wonderful Launcher first if your goal is to run ComfyUI workflows, fix missing models, or install a Windows desktop app.
 
-[**Download the maintained Windows launcher**](https://github.com/hu-haibin/wonderful-launcher-comfyui/releases/latest) · [**Wonderful Launcher release repo**](https://github.com/hu-haibin/wonderful-launcher-comfyui) · [**Website**](https://wonderfullauncher.com/) · [**Docs**](https://wonderfullauncher.com/docs)
+[**Download Wonderful Launcher**](https://github.com/hu-haibin/wonderful-launcher-comfyui/releases/latest) · [**Release repository**](https://github.com/hu-haibin/wonderful-launcher-comfyui) · [**Website**](https://wonderfullauncher.com/) · [**Docs**](https://wonderfullauncher.com/docs)
 
 </div>
 
 ---
 
-## Which one should you use?
+> [!IMPORTANT]
+> If you are here because a ComfyUI workflow is missing models, the maintained path is **Wonderful Launcher**. This repository is an older standalone Python utility kept for people who specifically want the legacy implementation.
 
-If you are here because a ComfyUI workflow is missing models, you probably want **Wonderful Launcher**, not this old Python utility.
+## Which repository should you use?
 
 | Your situation | Recommended path |
 |----------------|------------------|
 | You want a Windows app that starts ComfyUI, reads startup logs, matches missing models, and downloads available models | Use [Wonderful Launcher](https://github.com/hu-haibin/wonderful-launcher-comfyui/releases/latest) |
+| You need the packaged installer | Use the [Wonderful Launcher release repository](https://github.com/hu-haibin/wonderful-launcher-comfyui) |
 | You want to inspect or modify the older standalone Python model-finder code | Use this repository |
-| You need a packaged installer | Use the Wonderful Launcher release repo |
 | You are comfortable with Python, Chrome automation, and manual folder setup | This repository can still be useful |
-
-This repository is kept as an open-source historical tool. The actively maintained user-facing release channel is:
-
-**<https://github.com/hu-haibin/wonderful-launcher-comfyui>**
 
 ---
 
-## What this repository does
+## This repository: ComfyUI-ModelFinder
 
-ComfyUI-ModelFinder is a standalone Python/Tkinter utility. It can help you:
+ComfyUI-ModelFinder is a legacy open-source Python/Tkinter tool for finding missing ComfyUI models. It can help you:
 
 - scan ComfyUI workflow JSON files and extract referenced model names
 - compare those model names with your local ComfyUI `models` folder
@@ -89,9 +86,7 @@ After startup, choose your ComfyUI path and model folders in the app UI.
 
 ---
 
-## Relationship with Wonderful Launcher
-
-The naming is easy to confuse, so here is the clean version:
+## Naming
 
 - **ComfyUI-ModelFinder**: this repository; old standalone Python model-finder utility.
 - **Wonderful Launcher**: maintained Windows desktop launcher for ComfyUI; current installer and release channel.

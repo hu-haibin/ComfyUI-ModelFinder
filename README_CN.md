@@ -2,36 +2,33 @@
 
 <div align="center">
 
-# ComfyUI-ModelFinder
+# 你要找的是当前维护的 ComfyUI 启动器吗？
 
-### 旧版开源 Python 工具，用来查找 ComfyUI 工作流缺失模型。
+### 如果你的目标是运行工作流、修缺失模型，或者安装 Windows 桌面应用，请先下载 Wonderful Launcher。
 
-[**下载当前维护的 Windows 启动器**](https://github.com/hu-haibin/wonderful-launcher-comfyui/releases/latest) · [**Wonderful Launcher 发版仓**](https://github.com/hu-haibin/wonderful-launcher-comfyui) · [**官网**](https://wonderfullauncher.com/) · [**文档**](https://wonderfullauncher.com/docs)
+[**下载 Wonderful Launcher**](https://github.com/hu-haibin/wonderful-launcher-comfyui/releases/latest) · [**Wonderful Launcher 发版仓**](https://github.com/hu-haibin/wonderful-launcher-comfyui) · [**官网**](https://wonderfullauncher.com/) · [**文档**](https://wonderfullauncher.com/docs)
 
 </div>
 
 ---
 
-## 我应该用哪个？
+> [!IMPORTANT]
+> 如果你是因为 ComfyUI 工作流缺模型才来到这里，当前维护路径是 **Wonderful Launcher**。这个仓库是旧版独立 Python 工具，主要留给明确需要旧实现的人。
 
-如果你是因为 ComfyUI 工作流缺模型才来到这里，大概率你真正需要的是 **Wonderful Launcher**，不是这个旧版 Python 工具。
+## 应该使用哪个仓库？
 
 | 你的情况 | 推荐路径 |
 |----------|----------|
 | 想用 Windows 桌面应用启动 ComfyUI、看启动日志、匹配缺失模型、下载可用模型 | 使用 [Wonderful Launcher](https://github.com/hu-haibin/wonderful-launcher-comfyui/releases/latest) |
+| 需要打包好的安装程序 | 去 [Wonderful Launcher 发版仓](https://github.com/hu-haibin/wonderful-launcher-comfyui) 下载 |
 | 想查看或修改早期独立 Python 模型查找代码 | 使用当前仓库 |
-| 需要打包好的安装程序 | 去 Wonderful Launcher 发版仓下载 |
 | 熟悉 Python、Chrome 自动化和手动目录配置 | 当前仓库仍然可以作为旧工具使用 |
-
-这个仓库会保留为开源历史工具。当前面向普通用户维护的下载和发版入口是：
-
-**<https://github.com/hu-haibin/wonderful-launcher-comfyui>**
 
 ---
 
-## 这个仓库能做什么
+## 当前仓库：ComfyUI-ModelFinder
 
-ComfyUI-ModelFinder 是一个独立的 Python/Tkinter 工具。它可以帮你：
+ComfyUI-ModelFinder 是一个旧版开源 Python/Tkinter 工具，用来查找 ComfyUI 工作流缺失模型。它可以帮你：
 
 - 扫描 ComfyUI 工作流 JSON，提取引用到的模型名称
 - 对比本地 ComfyUI `models` 目录，找出可能缺失的模型
@@ -89,9 +86,7 @@ python run_model_finder.py
 
 ---
 
-## 和 Wonderful Launcher 的关系
-
-这里容易混淆，所以直接说清楚：
+## 命名说明
 
 - **ComfyUI-ModelFinder**：当前仓库；早期独立 Python 模型查找工具。
 - **Wonderful Launcher**：当前维护的 ComfyUI Windows 桌面启动器；包含启动、日志、修复、模型匹配和下载等流程。
